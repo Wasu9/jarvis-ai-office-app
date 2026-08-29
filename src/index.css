@@ -1,0 +1,29 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    background: radial-gradient(circle at 0% 0%, #1a1b3a 0%, #080918 45%, #05060f 100%);
+    background-attachment: fixed;
+    min-height: 100vh;
+    color: #e2e8f0;
+  }
+}
+
+/* Custom scrollbar for frosted glass look */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(6, 182, 212, 0.4);
+}

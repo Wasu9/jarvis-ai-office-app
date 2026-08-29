@@ -1,0 +1,6 @@
+{
+  "name": "JARVIS AI Office",
+  "description": "Production-grade AI work assistant for educational institutes: NEET/JEE papers, bilingual conversions, DPPs, notices, posters, social media, and extensible agents.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
