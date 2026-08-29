@@ -19,35 +19,36 @@ export interface AIProvider {
 
 export class GeminiProvider implements AIProvider {
   name = 'Gemini 3.7 Flash';
-  private client: GoogleGenAI | null = null;
 
-  constructor() {
-    this.initClient();
+  // Do not permanently cache the client or API key. In serverless environments,
+  // environment variables can be available after module initialization.
+  private getApiKey(): string | undefined {
+    const key = process.env.GEMINI_API_KEY;
+    return typeof key === 'string' && key.trim().length > 0 ? key.trim() : undefined;
   }
 
-  private initClient() {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (apiKey) {
-      this.client = new GoogleGenAI({
-        apiKey,
-        httpOptions: {
-          headers: {
-            'User-Agent': 'aistudio-build',
-          },
+  private getClient(): GoogleGenAI | null {
+    const apiKey = this.getApiKey();
+    if (!apiKey) return null;
+
+    return new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
         },
-      });
-    }
+      },
+    });
   }
 
   isAvailable(): boolean {
-    if (!this.client) {
-      this.initClient();
-    }
-    return !!this.client && !!process.env.GEMINI_API_KEY;
+    return !!this.getApiKey();
   }
 
   async generateText(prompt: string, options?: AICompletionOptions): Promise<string> {
-    if (!this.isAvailable()) {
+    // Resolve the environment variable at request time, not at module import time.
+    const client = this.getClient();
+    if (!client) {
       throw new Error(
         'Gemini API key is not configured in process.env.GEMINI_API_KEY. Please ensure the API key is set.'
       );
@@ -83,7 +84,7 @@ export class GeminiProvider implements AIProvider {
       // Try up to 2 attempts per model with backoff
       for (let attempt = 1; attempt <= 2; attempt++) {
         try {
-          const response = await this.client!.models.generateContent({
+          const response = await client.models.generateContent({
             model: currentModel,
             contents: contentsParts.length === 1 && contentsParts[0].text ? contentsParts[0].text : { parts: contentsParts },
             config: {
@@ -109,7 +110,6 @@ export class GeminiProvider implements AIProvider {
             break;
           }
 
-          // Small backoff before retry or fallback
           await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
         }
       }
@@ -120,7 +120,6 @@ export class GeminiProvider implements AIProvider {
   }
 }
 
-// Extensible AI Provider Registry
 class ProviderRegistry {
   private providers: Map<string, AIProvider> = new Map();
   private activeProviderKey = 'gemini';
