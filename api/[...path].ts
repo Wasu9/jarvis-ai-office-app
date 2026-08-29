@@ -11,6 +11,20 @@ const app = express();
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
+// Vercel's catch-all function can receive the request path with or without
+// the /api prefix depending on the deployment routing layer. Normalize it so
+// every API endpoint below is reachable consistently in production.
+app.use((req, _res, next) => {
+  if (req.url === '/') {
+    next();
+    return;
+  }
+  if (!req.url.startsWith('/api/')) {
+    req.url = `/api${req.url}`;
+  }
+  next();
+});
+
 app.get('/api/health', (_req, res) => {
   res.json({
     status: 'ok',
