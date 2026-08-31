@@ -29,6 +29,5 @@ export async function chatWithJarvis(prompt: string, model?: string, history: Ar
   return aiRegistry.getProvider('gemini').generateText(composed, {
     systemInstruction: CHAT_SYSTEM,
     model: model || 'gemini-3.7-flash',
-    temperature: 0.55,
   });
 }
