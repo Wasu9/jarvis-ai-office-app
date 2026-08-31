@@ -7,6 +7,7 @@ import { memoryStore } from './server/memory.js';
 import { TaskRunner } from './server/task-runner.js';
 import { aiRegistry } from './server/ai/provider.js';
 import { generateDocxBuffer } from './server/docx-generator.js';
+import { chatWithJarvis } from './server/chat.js';
 
 dotenv.config();
 
@@ -18,98 +19,61 @@ async function startServer() {
   app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
   app.get('/api/health', (req, res) => {
-    res.json({
-      status: 'ok',
-      service: 'JARVIS AI Office',
-      timestamp: new Date().toISOString(),
-      aiConfigured: !!process.env.GEMINI_API_KEY,
-    });
+    res.json({ status: 'ok', service: 'JARVIS AI Office', timestamp: new Date().toISOString(), aiConfigured: !!process.env.GEMINI_API_KEY });
   });
 
   app.get('/api/providers', (req, res) => {
-    res.json({
-      providers: aiRegistry.listProviders(),
-      current: 'gemini',
-      isApiKeySet: !!process.env.GEMINI_API_KEY,
-    });
+    res.json({ providers: aiRegistry.listProviders(), current: 'gemini', isApiKeySet: !!process.env.GEMINI_API_KEY });
   });
 
-  app.get('/api/agents', (req, res) => {
-    res.json({ agents: agentRegistry.getAllAgents() });
-  });
+  app.get('/api/agents', (req, res) => { res.json({ agents: agentRegistry.getAllAgents() }); });
 
   app.post('/api/agents', (req, res) => {
     try {
       const { name, description, capabilities, systemPrompt, inputRequirements, outputTypes, iconName } = req.body;
       if (!name || !systemPrompt) return res.status(400).json({ error: 'Name and System Prompt are required' });
-      const newAgent = agentRegistry.addCustomAgent({
-        name,
-        description: description || 'Custom AI Agent',
-        capabilities: capabilities || ['custom'],
-        systemPrompt,
-        inputRequirements: inputRequirements || ['User instructions'],
-        outputTypes: outputTypes || ['markdown', 'docx'],
-        category: 'custom',
-        enabled: true,
-        iconName: iconName || 'Bot',
-        samplePrompts: [],
-      });
+      const newAgent = agentRegistry.addCustomAgent({ name, description: description || 'Custom AI Agent', capabilities: capabilities || ['custom'], systemPrompt, inputRequirements: inputRequirements || ['User instructions'], outputTypes: outputTypes || ['markdown', 'docx'], category: 'custom', enabled: true, iconName: iconName || 'Bot', samplePrompts: [] });
       res.status(201).json({ agent: newAgent });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
   });
 
   app.put('/api/agents/:id', (req, res) => {
-    try {
-      const updated = agentRegistry.updateAgent(req.params.id, req.body);
-      if (!updated) return res.status(404).json({ error: 'Agent not found' });
-      res.json({ agent: updated });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
+    try { const updated = agentRegistry.updateAgent(req.params.id, req.body); if (!updated) return res.status(404).json({ error: 'Agent not found' }); res.json({ agent: updated }); }
+    catch (err: any) { res.status(500).json({ error: err.message }); }
   });
 
   app.delete('/api/agents/:id', (req, res) => {
-    try {
-      const deleted = agentRegistry.deleteCustomAgent(req.params.id);
-      if (!deleted) return res.status(404).json({ error: 'Agent not found or cannot delete built-in agent' });
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
+    try { const deleted = agentRegistry.deleteCustomAgent(req.params.id); if (!deleted) return res.status(404).json({ error: 'Agent not found or cannot delete built-in agent' }); res.json({ success: true }); }
+    catch (err: any) { res.status(500).json({ error: err.message }); }
   });
 
-  app.get('/api/memory', (req, res) => {
-    res.json({ memories: memoryStore.getAll() });
-  });
+  app.get('/api/memory', (req, res) => { res.json({ memories: memoryStore.getAll() }); });
 
   app.post('/api/memory', (req, res) => {
-    try {
-      const { category, key, value, id } = req.body;
-      if (!key || !value) return res.status(400).json({ error: 'Key and Value are required' });
-      const entry = memoryStore.set({ id, category: category || 'custom', key, value });
-      res.status(201).json({ memory: entry });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
+    try { const { category, key, value, id } = req.body; if (!key || !value) return res.status(400).json({ error: 'Key and Value are required' }); const entry = memoryStore.set({ id, category: category || 'custom', key, value }); res.status(201).json({ memory: entry }); }
+    catch (err: any) { res.status(500).json({ error: err.message }); }
   });
 
   app.delete('/api/memory/:id', (req, res) => {
-    try {
-      const deleted = memoryStore.delete(req.params.id);
-      res.json({ success: deleted });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
+    try { const deleted = memoryStore.delete(req.params.id); res.json({ success: deleted }); }
+    catch (err: any) { res.status(500).json({ error: err.message }); }
   });
 
   app.post('/api/memory/clear', (req, res) => {
+    try { memoryStore.clear(); res.json({ success: true }); }
+    catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+
+  // Fast conversational path: no agent-routing, memory validation or DOCX generation.
+  app.post('/api/chat', async (req, res) => {
     try {
-      memoryStore.clear();
-      res.json({ success: true });
+      const { message, model } = req.body;
+      if (!message?.trim()) return res.status(400).json({ error: 'Message is required' });
+      const reply = await chatWithJarvis(message, model);
+      res.json({ reply });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      console.error('[Chat Error]', err);
+      res.status(500).json({ error: err.message || 'Chat failed' });
     }
   });
 
@@ -132,63 +96,30 @@ async function startServer() {
     }
   });
 
-  // Streaming execution endpoint: the browser receives the real TaskRunner events as they happen.
   app.post('/api/tasks/execute-stream', async (req, res) => {
     const { userPrompt, selectedAgentId, attachedFiles, model, settings } = req.body;
     if (!userPrompt && (!attachedFiles || attachedFiles.length === 0)) return res.status(400).json({ error: 'Prompt or attached file is required' });
-
-    res.status(200);
-    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-    res.setHeader('Cache-Control', 'no-cache, no-transform');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no');
-    (res as any).flushHeaders?.();
-
-    const send = (payload: any) => {
-      if (!(res as any).writableEnded) res.write(`data: ${JSON.stringify(payload)}\n\n`);
-    };
-
+    res.status(200); res.setHeader('Content-Type', 'text/event-stream; charset=utf-8'); res.setHeader('Cache-Control', 'no-cache, no-transform'); res.setHeader('Connection', 'keep-alive'); res.setHeader('X-Accel-Buffering', 'no'); (res as any).flushHeaders?.();
+    const send = (payload: any) => { if (!(res as any).writableEnded) res.write(`data: ${JSON.stringify(payload)}\n\n`); };
     try {
-      const taskRecord = await TaskRunner.execute({
-        userPrompt: userPrompt || 'Process the attached document.',
-        selectedAgentId,
-        attachedFiles,
-        model,
-        settings,
-        onStep: (step) => send({ type: 'step', step }),
-      });
-      send({ type: 'task', task: taskRecord });
-      send({ type: 'done' });
-    } catch (err: any) {
-      send({ type: 'error', error: err.message || 'Task execution failed' });
-    } finally {
-      if (!(res as any).writableEnded) res.end();
-    }
+      const taskRecord = await TaskRunner.execute({ userPrompt: userPrompt || 'Process the attached document.', selectedAgentId, attachedFiles, model, settings, onStep: (step) => send({ type: 'step', step }) });
+      send({ type: 'task', task: taskRecord }); send({ type: 'done' });
+    } catch (err: any) { send({ type: 'error', error: err.message || 'Task execution failed' }); }
+    finally { if (!(res as any).writableEnded) res.end(); }
   });
 
   app.post('/api/generate-docx', async (req, res) => {
-    try {
-      const docxBuffer = await generateDocxBuffer(req.body);
-      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-      res.setHeader('Content-Disposition', 'attachment; filename="JARVIS_document.docx"');
-      res.send(docxBuffer);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
+    try { const docxBuffer = await generateDocxBuffer(req.body); res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'); res.setHeader('Content-Disposition', 'attachment; filename="JARVIS_document.docx"'); res.send(docxBuffer); }
+    catch (err: any) { res.status(500).json({ error: err.message }); }
   });
 
   if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({ server: { middlewareMode: true }, appType: 'spa' });
-    app.use(vite.middlewares);
+    const vite = await createViteServer({ server: { middlewareMode: true }, appType: 'spa' }); app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => res.sendFile(path.join(distPath, 'index.html')));
+    const distPath = path.join(process.cwd(), 'dist'); app.use(express.static(distPath)); app.get('*', (req, res) => res.sendFile(path.join(distPath, 'index.html')));
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`[JARVIS AI Office] Server listening on http://0.0.0.0:${PORT}`);
-  });
+  app.listen(PORT, '0.0.0.0', () => console.log(`[JARVIS AI Office] Server listening on http://0.0.0.0:${PORT}`));
 }
 
 startServer().catch((err) => console.error('Failed to start server:', err));
