@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Clock, Brain, Cpu, Sparkles, CheckCircle2, AlertCircle, RefreshCw, Layers, Terminal, Zap, Radio, Activity, ShieldCheck } from 'lucide-react';
-import { TaskRecord, TaskStatus } from '../types';
+import { TaskRecord, TaskStatus, TaskStep } from '../types';
 
 interface TaskPipelineStepperProps { task: TaskRecord; onRetry?: () => void; }
 
@@ -16,11 +16,30 @@ const phases = [
 const statusIndex = (s: TaskStatus) => ({ waiting: 0, understanding: 1, working: 2, generating: 3, checking: 4, completed: 5, failed: -1 } as Record<string, number>)[s] ?? 0;
 
 export const TaskPipelineStepper: React.FC<TaskPipelineStepperProps> = ({ task, onRetry }) => {
-  const failed = task.status === 'failed';
-  const live = !failed && task.status !== 'completed';
-  const realIndex = statusIndex(task.status);
   const [pulse, setPulse] = useState(0);
   const [elapsed, setElapsed] = useState(0);
+  const [liveSteps, setLiveSteps] = useState<TaskStep[]>(task.steps || []);
+  const [liveStatus, setLiveStatus] = useState<TaskStatus>(task.status);
+
+  useEffect(() => {
+    setLiveSteps(task.steps || []);
+    setLiveStatus(task.status);
+  }, [task.id, task.status, task.steps]);
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const step = (event as CustomEvent<TaskStep>).detail;
+      if (!step) return;
+      setLiveSteps(prev => [...prev.filter(s => s.timestamp !== step.timestamp), step]);
+      setLiveStatus(step.status);
+    };
+    window.addEventListener('jarvis-task-step', handler);
+    return () => window.removeEventListener('jarvis-task-step', handler);
+  }, []);
+
+  const failed = liveStatus === 'failed';
+  const live = !failed && liveStatus !== 'completed';
+  const realIndex = statusIndex(liveStatus);
 
   useEffect(() => {
     if (!live) return;
@@ -32,9 +51,9 @@ export const TaskPipelineStepper: React.FC<TaskPipelineStepperProps> = ({ task, 
     return () => window.clearInterval(timer);
   }, [live, task.createdAt]);
 
-  const progress = failed ? 0 : task.status === 'completed' ? 100 : Math.round(((realIndex + 1) / phases.length) * 100);
+  const progress = failed ? 0 : liveStatus === 'completed' ? 100 : Math.round(((realIndex + 1) / phases.length) * 100);
   const elapsedLabel = `${Math.floor(elapsed / 60000).toString().padStart(2, '0')}:${Math.floor((elapsed % 60000) / 1000).toString().padStart(2, '0')}`;
-  const terminalLines = useMemo(() => task.steps || [], [task.steps]);
+  const terminalLines = useMemo(() => liveSteps, [liveSteps]);
   const latestStep = terminalLines[terminalLines.length - 1];
 
   return (
@@ -84,7 +103,7 @@ export const TaskPipelineStepper: React.FC<TaskPipelineStepperProps> = ({ task, 
         <div className="rounded-2xl border border-cyan-400/10 bg-black/30 p-4">
           <div className="mb-4 flex items-center gap-2 text-[10px] font-black tracking-[0.18em] text-slate-400"><ShieldCheck className="h-3.5 w-3.5 text-cyan-300" /> SYSTEM SIGNAL</div>
           <div className="space-y-3 font-mono text-[10px]">
-            {phases.map((p, i) => { const done = !failed && (realIndex > i || task.status === 'completed'); const current = live && i === realIndex; return <div key={p.key} className="flex items-center gap-2"><span className={`h-1.5 w-1.5 rounded-full ${done ? 'bg-emerald-400' : current ? 'bg-cyan-300 animate-pulse' : 'bg-slate-700'}`} /><span className={current ? 'text-cyan-200' : done ? 'text-slate-400' : 'text-slate-700'}>{p.label}</span><span className="ml-auto text-[8px]">{done ? 'DONE' : current ? 'ACTIVE' : 'WAIT'}</span></div>; })}
+            {phases.map((p, i) => { const done = !failed && (realIndex > i || liveStatus === 'completed'); const current = live && i === realIndex; return <div key={p.key} className="flex items-center gap-2"><span className={`h-1.5 w-1.5 rounded-full ${done ? 'bg-emerald-400' : current ? 'bg-cyan-300 animate-pulse' : 'bg-slate-700'}`} /><span className={current ? 'text-cyan-200' : done ? 'text-slate-400' : 'text-slate-700'}>{p.label}</span><span className="ml-auto text-[8px]">{done ? 'DONE' : current ? 'ACTIVE' : 'WAIT'}</span></div>; })}
           </div>
           <div className="mt-5 border-t border-white/5 pt-4"><div className="mb-2 flex justify-between text-[9px] font-mono text-slate-500"><span>SERVER PIPELINE</span><span>{progress}%</span></div><div className="h-1.5 overflow-hidden rounded-full bg-white/5"><div className="h-full bg-cyan-300 shadow-[0_0_12px_rgba(34,211,238,.8)] transition-all duration-300" style={{ width: `${progress}%` }} />{live && <div className="relative -top-1 h-1.5 w-16 bg-white/70 blur-sm animate-[scan_1.2s_linear_infinite]" />}</div></div>
           {latestStep && <div className="mt-4 rounded-xl border border-cyan-400/10 bg-cyan-400/[0.03] p-3 text-[9px] text-slate-500"><div className="mb-1 text-cyan-300">CURRENT EVENT</div>{latestStep.label}</div>}
