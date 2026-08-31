@@ -23,16 +23,16 @@ export const OfficeSimulation3D:React.FC<Props>=({agents,activeTask})=>{
  useEffect(()=>{
   if(!host.current)return;
   let disposed=false,raf=0; const workers:any[]=[]; let jarvis:any,boss:any;
-  const scene=new THREE.Scene(); scene.background=new THREE.Color(0x071017); scene.fog=new THREE.FogExp2(0x071017,.026);
-  const camera=new THREE.PerspectiveCamera(42,1,.05,120); camera.position.set(21,22,24);
+  const scene=new THREE.Scene(); scene.background=new THREE.Color(0x071017); scene.fog=new THREE.FogExp2(0x071017,.020);
+  const camera=new THREE.PerspectiveCamera(42,1,.05,120); camera.position.set(18,19,20);
   const renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:'high-performance'});
   renderer.setPixelRatio(Math.min(window.devicePixelRatio,2)); renderer.shadowMap.enabled=true; renderer.shadowMap.type=THREE.PCFSoftShadowMap;
-  renderer.outputColorSpace=THREE.SRGBColorSpace; renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=1.18;
+  renderer.outputColorSpace=THREE.SRGBColorSpace; renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=1.12;
   renderer.physicallyCorrectLights=true; host.current.innerHTML=''; host.current.appendChild(renderer.domElement);
   const composer=new EffectComposer(renderer); composer.setPixelRatio(Math.min(window.devicePixelRatio,2));
   composer.addPass(new RenderPass(scene,camera));
-  const bloom=new UnrealBloomPass(new THREE.Vector2(900,600),.28,.65,.82); composer.addPass(bloom);
-  const controls=new OrbitControls(camera,renderer.domElement); controls.target.set(0,.45,0); controls.enableDamping=true; controls.dampingFactor=.065; controls.minDistance=18; controls.maxDistance=42; controls.maxPolarAngle=1.39; controls.minPolarAngle=.48; controls.enablePan=true; controls.panSpeed=.35; controls.rotateSpeed=.38; controls.zoomSpeed=.65;
+  const bloom=new UnrealBloomPass(new THREE.Vector2(900,600),.20,.62,.84); composer.addPass(bloom);
+  const controls=new OrbitControls(camera,renderer.domElement); controls.target.set(0,.55,0); controls.enableDamping=true; controls.dampingFactor=.065; controls.minDistance=15; controls.maxDistance=36; controls.maxPolarAngle=1.39; controls.minPolarAngle=.48; controls.enablePan=true; controls.panSpeed=.35; controls.rotateSpeed=.38; controls.zoomSpeed=.65;
 
   const pmrem=new THREE.PMREMGenerator(renderer); const env=new RoomEnvironment(); const envTex=pmrem.fromScene(env,0.04).texture; scene.environment=envTex; env.dispose(); pmrem.dispose();
   const mat=(color:number,rough=.5,metal=.05,emissive?:number,ei=0)=>new THREE.MeshStandardMaterial({color,roughness:rough,metalness:metal,emissive:emissive??0,emissiveIntensity:ei});
@@ -55,7 +55,6 @@ export const OfficeSimulation3D:React.FC<Props>=({agents,activeTask})=>{
   const wall=(x:number,y:number,z:number,sx:number,sy:number,sz:number,transparent=false)=>{const m=new THREE.Mesh(new THREE.BoxGeometry(sx,sy,sz),transparent?glass:darkWall);m.position.set(x,y,z);m.castShadow=true;m.receiveShadow=true;add(m);return m;};
   wall(0,1.35,-9.55,30,.28,.42);wall(-14.65,1.35,0,.42,2.7,19.2);wall(14.65,1.35,0,.42,2.7,19.2);wall(0,1.35,9.55,30,.28,.42);
   [-6.7,0,6.7].forEach(x=>{wall(x,1.38,-4.42,.09,2.72,9.0,true);wall(x,1.38,4.42,.09,2.72,9.0,true);});
-  // Glass mullions and door frames.
   [-6.7,0,6.7].forEach(x=>{box(x,1.38,-4.42,.045,2.72,9.0,0x6ed7e8,.28,.35);box(x,1.38,4.42,.045,2.72,9.0,0x6ed7e8,.28,.35);});
   [-13.8,13.8].forEach(x=>{for(let z=-7;z<=7;z+=3.5)box(x,1.45,z,.04,2.5,.025,0x4dd7eb,.22,.5);});
 
@@ -65,8 +64,7 @@ export const OfficeSimulation3D:React.FC<Props>=({agents,activeTask})=>{
 
   const ceiling=(x:number,z:number)=>{box(x,2.72,z,3.8,.055,.18,0x27363e,.25,.55);box(x,2.69,z,3.2,.025,.025,0x43e6f4,.18,.6);const l=new THREE.PointLight(0xe8fbff,8.5,6,2);l.position.set(x,2.52,z);add(l);};
   ROOMS.forEach(r=>ceiling(r[1],r[2]));
-  // Large windows at the rear create a real office depth cue.
-  for(let i=-2;i<=2;i++){const win=box(i*5.2,1.6,-9.32,4.5,2.05,.04,0x102c38,.12,.25);const glow=box(i*5.2,1.6,-9.30,4.1,1.65,.025,0x123e4d,.2,.18);(glow.material as THREE.MeshStandardMaterial).emissive.setHex(0x0a2732);}
+  for(let i=-2;i<=2;i++){box(i*5.2,1.6,-9.32,4.5,2.05,.04,0x102c38,.12,.25);const glow=box(i*5.2,1.6,-9.30,4.1,1.65,.025,0x123e4d,.2,.18);(glow.material as THREE.MeshStandardMaterial).emissive.setHex(0x0a2732);}
 
   const desk=(x:number,z:number,rot=0,width=2.5)=>{const g=new THREE.Group();g.position.set(x,0,z);g.rotation.y=rot;const wood=mat(0x604432,.52,.08);const metal=mat(0x26323a,.35,.58);const top=new THREE.Mesh(new THREE.BoxGeometry(width,.15,1.2),wood);top.position.y=1.02;top.castShadow=true;g.add(top);[-width*.38,width*.38].forEach(px=>{const leg=new THREE.Mesh(new THREE.BoxGeometry(.105,.92,.105),metal);leg.position.set(px,.5,0);leg.castShadow=true;g.add(leg);});const monitor=new THREE.Mesh(new THREE.BoxGeometry(1.25,.78,.075),metal);monitor.position.set(0,1.62,-.14);g.add(monitor);const screen=new THREE.Mesh(new THREE.PlaneGeometry(1.08,.59),new THREE.MeshStandardMaterial({color:0x07313a,roughness:.22,metalness:.3,emissive:0x05242c,emissiveIntensity:1.2}));screen.position.set(0,1.62,-.185);g.add(screen);const stand=new THREE.Mesh(new THREE.BoxGeometry(.14,.35,.12),metal);stand.position.set(0,1.27,-.13);g.add(stand);const keyboard=new THREE.Mesh(new THREE.BoxGeometry(.82,.035,.32),mat(0x9ba5aa,.38,.15));keyboard.position.set(0,1.13,.22);g.add(keyboard);const chair=new THREE.Group();const seat=new THREE.Mesh(new THREE.BoxGeometry(.9,.16,.9),mat(0x263d47,.55,.12));seat.position.y=.58;seat.castShadow=true;chair.add(seat);const back=new THREE.Mesh(new THREE.BoxGeometry(.82,1.0,.13),mat(0x263d47,.55,.12));back.position.set(0,1.05,.42);back.castShadow=true;chair.add(back);const stem=new THREE.Mesh(new THREE.CylinderGeometry(.055,.055,.55,10),metal);stem.position.y=.27;chair.add(stem);chair.position.z=.82;g.add(chair);add(g);return g;};
   HOMES.forEach((p,i)=>desk(p[0],p[1],i<4?0:Math.PI));
@@ -92,17 +90,14 @@ export const OfficeSimulation3D:React.FC<Props>=({agents,activeTask})=>{
   jarvis=chairPerson('JARVIS',7,0,-1.8);jarvis.scale.setScalar(1.13);textSprite('JARVIS • MANAGER',0,2.98,-1.8,1.0,true);
   boss=chairPerson('BOSS / CEO',6,10,6.95);boss.scale.setScalar(1.1);textSprite('YOUR COMMAND DESK',10,2.55,7.0,.82,true);
 
-  // Coffee lounge: table, cups, sofa and plant.
   box(0,.08,1.55,3.1,.14,1.7,0x283943,.66,.1);box(0,.42,1.55,2.35,.62,1.15,0x1c2930,.76,.04);cyl(.0,.86,1.55,.62,.1,0x4b3528,.5);cyl(0,.49,1.55,.06,.7,0x303b42,.42);
   for(const dx of [-.55,.55]){const cup=cyl(dx,.94,1.55,.13,.22,0xc9a46d,.4);const handle=new THREE.Mesh(new THREE.TorusGeometry(.075,.025,8,16),mat(0xc9a46d,.4));handle.rotation.y=Math.PI/2;handle.position.set(dx+.13,.94,1.55);add(handle);}
   textSprite('COFFEE • BREAK LOUNGE',0,1.45,1.55,.68);
   const plant=(x:number,z:number)=>{cyl(x,.22,z,.27,.42,0x5b4336,.76);for(let k=0;k<7;k++){const leaf=new THREE.Mesh(new THREE.SphereGeometry(.2,12,10),mat(0x267e5b,.7,.02));leaf.scale.set(.55,1.6,.42);leaf.position.set(x+(k-3)*.13,.68+(k%2)*.06,z+(k%3-.9)*.12);leaf.castShadow=true;add(leaf);}};
   plant(-12.9,-7.8);plant(12.9,-7.8);plant(-12.9,7.8);plant(12.9,7.8);
 
-  // DATA room hardware.
   for(let k=0;k<3;k++){const rack=box(8.95+k*.72,1.0,5.75,.5,1.75,1.05,0x17232a,.28,.72);for(let j=0;j<5;j++){const led=box(8.95+k*.72,.52+j*.27,5.19,.25,.025,.025,0x22d9e8,.18,.5);(led.material as THREE.MeshStandardMaterial).emissive.setHex(0x22d9e8);(led.material as THREE.MeshStandardMaterial).emissiveIntensity=1.4;}}
 
-  // Wall clock + logo panel.
   const clock=new THREE.Mesh(new THREE.CylinderGeometry(.62,.62,.08,32),mat(0x18242c,.25,.55));clock.rotation.x=Math.PI/2;clock.position.set(-11.9,2.25,-9.3);add(clock);for(let a=0;a<12;a++){const tick=new THREE.Mesh(new THREE.BoxGeometry(.025,.12,.025),mat(0x8aeaf4,.25,.35));tick.position.set(-11.9+Math.sin(a*Math.PI/6)*.45,2.25+Math.cos(a*Math.PI/6)*.45,-9.38);add(tick);}
   textSprite('JARVIS AI • LIVE FLOOR',0,2.55,9.28,.72,true);
 
@@ -124,6 +119,6 @@ export const OfficeSimulation3D:React.FC<Props>=({agents,activeTask})=>{
   animate(performance.now());
   return()=>{disposed=true;cancelAnimationFrame(raf);window.removeEventListener('resize',resize);controls.dispose();composer.dispose();renderer.dispose();scene.traverse((o:any)=>{o.geometry?.dispose?.();if(o.material){if(Array.isArray(o.material))o.material.forEach((m:any)=>m.dispose?.());else o.material.dispose?.();}});envTex.dispose();if(host.current)host.current.innerHTML='';};
  },[agents]);
- return <div className="relative w-full overflow-hidden rounded-[26px] border border-cyan-300/15 bg-[#071017] shadow-[0_35px_120px_rgba(0,0,0,.65)]"><div className="pointer-events-none absolute left-4 top-4 z-10 rounded-xl border border-cyan-300/25 bg-[#071017]/85 px-3 py-2 text-[10px] font-bold tracking-[.12em] text-cyan-100 backdrop-blur">3D AI OFFICE · LIVE · HD</div><div className="pointer-events-none absolute bottom-4 left-4 z-10 rounded-lg bg-black/45 px-2 py-1 text-[9px] text-slate-300">Drag = rotate · Wheel = zoom · Right drag = pan · Missions move employees</div><div ref={host} className="h-[680px] w-full"/></div>;
+ return <div className="relative w-full overflow-hidden rounded-[26px] border border-cyan-300/15 bg-[#071017] shadow-[0_35px_120px_rgba(0,0,0,.65)]"><div className="pointer-events-none absolute left-4 top-4 z-10 rounded-xl border border-cyan-300/25 bg-[#071017]/85 px-3 py-2 text-[10px] font-bold tracking-[.12em] text-cyan-100 backdrop-blur">3D AI OFFICE · LIVE · HD · MINIATURE</div><div className="pointer-events-none absolute bottom-4 left-4 z-10 rounded-lg bg-black/45 px-2 py-1 text-[9px] text-slate-300">Drag = rotate · Wheel = zoom · Right drag = pan · Missions move employees</div><div ref={host} className="h-[620px] w-full"/></div>;
 };
 export default OfficeSimulation3D;
