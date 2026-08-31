@@ -2,6 +2,7 @@ import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
+import './server/agents/agency-bootstrap.js';
 import { agentRegistry } from './server/agents/definitions.js';
 import { memoryStore } from './server/memory.js';
 import { TaskRunner } from './server/task-runner.js';
@@ -26,10 +27,7 @@ async function startServer() {
   app.post('/api/memory',(req,res)=>{try{const {category,key,value,id}=req.body;if(!key||!value)return res.status(400).json({error:'Key and Value are required'});res.status(201).json({memory:memoryStore.set({id,category:category||'custom',key,value})});}catch(err:any){res.status(500).json({error:err.message});}});
   app.delete('/api/memory/:id',(req,res)=>{try{res.json({success:memoryStore.delete(req.params.id)});}catch(err:any){res.status(500).json({error:err.message});}});
   app.post('/api/memory/clear',(req,res)=>{try{memoryStore.clear();res.json({success:true});}catch(err:any){res.status(500).json({error:err.message});}});
-
-  // Fast conversational path. It deliberately bypasses production-agent routing.
   app.post('/api/chat',async(req,res)=>{try{const {message,model,history}=req.body;if(!message?.trim())return res.status(400).json({error:'Message is required'});const reply=await chatWithJarvis(message,model,Array.isArray(history)?history:[]);res.json({reply});}catch(err:any){console.error('[Chat Error]',err);res.status(500).json({error:err.message||'Chat failed'});}});
-
   app.post('/api/tasks/route-check',(req,res)=>{const {prompt,attachedFiles,selectedAgentId}=req.body;const routedAgentId=TaskRunner.routeAgent(prompt||'',attachedFiles,selectedAgentId);res.json({routedAgentId,agent:agentRegistry.getAgent(routedAgentId)});});
   app.post('/api/tasks/execute',async(req,res)=>{try{const {userPrompt,selectedAgentId,attachedFiles,model,settings}=req.body;if(!userPrompt&&(!attachedFiles||attachedFiles.length===0))return res.status(400).json({error:'Prompt or attached file is required'});res.json({task:await TaskRunner.execute({userPrompt:userPrompt||'Process the attached document.',selectedAgentId,attachedFiles,model,settings})});}catch(err:any){console.error('[Execute Task Error]',err);res.status(500).json({error:err.message||'Task execution failed'});}});
   app.post('/api/tasks/execute-stream',async(req,res)=>{const {userPrompt,selectedAgentId,attachedFiles,model,settings}=req.body;if(!userPrompt&&(!attachedFiles||attachedFiles.length===0))return res.status(400).json({error:'Prompt or attached file is required'});res.status(200);res.setHeader('Content-Type','text/event-stream; charset=utf-8');res.setHeader('Cache-Control','no-cache, no-transform');res.setHeader('Connection','keep-alive');res.setHeader('X-Accel-Buffering','no');(res as any).flushHeaders?.();const send=(payload:any)=>{if(!(res as any).writableEnded)res.write(`data: ${JSON.stringify(payload)}\n\n`);};try{const task=await TaskRunner.execute({userPrompt:userPrompt||'Process the attached document.',selectedAgentId,attachedFiles,model,settings,onStep:step=>send({type:'step',step})});send({type:'task',task});send({type:'done'});}catch(err:any){send({type:'error',error:err.message||'Task execution failed'});}finally{if(!(res as any).writableEnded)res.end();}});
