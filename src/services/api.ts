@@ -31,7 +31,10 @@ export class ApiService {
   static async deleteMemory(id:string):Promise<boolean>{const res=await fetch(`/api/memory/${id}`,{method:'DELETE'});const data=await res.json();return data.success;}
   static async clearAllMemory():Promise<boolean>{const res=await fetch('/api/memory/clear',{method:'POST'});const data=await res.json();return data.success;}
   static async checkAgentRoute(prompt:string,attachedFiles?:AttachedFile[],selectedAgentId?:string){const res=await fetch('/api/tasks/route-check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt,attachedFiles,selectedAgentId})});return await res.json();}
-  static async executeTask(params:{userPrompt:string;selectedAgentId?:string;attachedFiles?:AttachedFile[];model?:string;settings?:Partial<JarvisSettings>}):Promise<TaskRecord>{const res=await fetch('/api/tasks/execute',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(params)});const data=await res.json();if(!res.ok)throw new Error(data.error||data.task?.error||'Failed to execute task');return data.task;}
+
+  static async executeTask(params:{userPrompt:string;selectedAgentId?:string;attachedFiles?:AttachedFile[];model?:string;settings?:Partial<JarvisSettings>}):Promise<TaskRecord>{
+    return this.executeTaskStream(params,(step)=>{ if(typeof window!=='undefined') window.dispatchEvent(new CustomEvent<TaskStep>('jarvis-task-step',{detail:step})); });
+  }
 
   static async executeTaskStream(
     params:{userPrompt:string;selectedAgentId?:string;attachedFiles?:AttachedFile[];model?:string;settings?:Partial<JarvisSettings>},
