@@ -5,6 +5,25 @@ export const DEFAULT_SETTINGS: JarvisSettings = {
   aiModel: 'gemini-3.7-flash', voiceAutoSpeak: false, watermarkText: 'SHAHEEN ACADEMY JAIPUR', contactNumber: '+91 98765 43210', theme: 'slate',
 };
 
+const PRODUCTION_WORDS = ['paper','question paper','test paper','exam paper','dpp','daily practice','pdf','word','docx','bilingual','translate','poster','notice','circular','reel','video script','social media','instagram','facebook','youtube','admission post','mock test','worksheet','answer key','options a','options b','generate document','create document'];
+const GREETINGS = /^(hi|hii|hello|hey|hey jarvis|hi jarvis|hello jarvis|good morning|good afternoon|good evening|how are you|how r u)[!.?\s]*$/i;
+function isConversational(prompt:string, selectedAgentId?:string, attachedFiles?:AttachedFile[]){
+  if(selectedAgentId && selectedAgentId !== 'auto') return false;
+  if(attachedFiles?.length) return false;
+  const lower=prompt.trim().toLowerCase();
+  if(GREETINGS.test(lower)) return true;
+  return !PRODUCTION_WORDS.some(word=>lower.includes(word));
+}
+function instantReply(prompt:string):string|null{
+  if(!GREETINGS.test(prompt.trim())) return null;
+  const p=prompt.trim().toLowerCase();
+  if(p.includes('how are you')||p.includes('how r u')) return 'Bilkul ready hoon 😎\nBatao, kya karna hai? Paper banana hai, PDF convert karni hai, ya kuch normal poochna hai?';
+  if(p.includes('good morning')) return 'Good morning! ⚡ JARVIS online hai. Batao aaj kya mission hai?';
+  if(p.includes('good afternoon')) return 'Good afternoon! ⚡ JARVIS ready hai. Batao kya karna hai?';
+  if(p.includes('good evening')) return 'Good evening! ⚡ JARVIS ready hai. Kya kaam shuru karein?';
+  return 'Hii! 👋 JARVIS online hai. Batao kya karna hai?';
+}
+
 export class ApiService {
   static async checkHealth() { const res = await fetch('/api/health'); return await res.json(); }
   static async getProviders() { const res = await fetch('/api/providers'); return await res.json(); }
@@ -16,9 +35,19 @@ export class ApiService {
   static async saveMemory(item:Partial<JarvisMemoryItem>):Promise<JarvisMemoryItem>{const res=await fetch('/api/memory',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(item)});return (await res.json()).memory;}
   static async deleteMemory(id:string):Promise<boolean>{return (await (await fetch(`/api/memory/${id}`,{method:'DELETE'})).json()).success;}
   static async clearAllMemory():Promise<boolean>{return (await (await fetch('/api/memory/clear',{method:'POST'})).json()).success;}
-  static async checkAgentRoute(prompt:string,attachedFiles?:AttachedFile[],selectedAgentId?:string){return await (await fetch('/api/tasks/route-check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt,attachedFiles,selectedAgentId})})).json();}
+  static async checkAgentRoute(prompt:string,attachedFiles?:AttachedFile[],selectedAgentId?:string){if(isConversational(prompt,selectedAgentId,attachedFiles))return {routedAgentId:'conversational-core',agent:{id:'conversational-core',name:'JARVIS Conversational Core',description:'Fast general-purpose assistant',enabled:true}};return await (await fetch('/api/tasks/route-check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt,attachedFiles,selectedAgentId})})).json();}
 
   static async executeTask(params:{userPrompt:string;selectedAgentId?:string;attachedFiles?:AttachedFile[];model?:string;settings?:Partial<JarvisSettings>}):Promise<TaskRecord>{
+    if(isConversational(params.userPrompt,params.selectedAgentId,params.attachedFiles)){
+      const started=Date.now();
+      const instant=instantReply(params.userPrompt);
+      const reply=instant || await (async()=>{const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:params.userPrompt,model:params.model||'gemini-3.7-flash'})});const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.error||'Conversational response failed');return String(data.reply||'');})();
+      const now=new Date();
+      const steps:TaskStep[]=[{status:'waiting',label:'JARVIS Conversational Core ready',timestamp:new Date(started).toISOString()},{status:'generating',label:instant?'Instant response':'Conversational response generated',timestamp:now.toISOString()}];
+      const task:TaskRecord={id:`chat-${started}`,title:params.userPrompt.slice(0,70)||'Conversation',userPrompt:params.userPrompt,agentId:'conversational-core',agentName:'JARVIS Conversational Core',status:'completed',createdAt:new Date(started).toISOString(),completedAt:now.toISOString(),steps,attachedFiles:[],result:{summary:'Conversational response',rawText:reply,structuredData:null,artifacts:[],agentUsed:{id:'conversational-core',name:'JARVIS Conversational Core'},metrics:{durationMs:Date.now()-started}} as any};
+      if(typeof window!=='undefined')for(const step of steps)window.dispatchEvent(new CustomEvent<TaskStep>('jarvis-task-step',{detail:step}));
+      return task;
+    }
     try {
       return await this.executeTaskStream(params,(step)=>{ if(typeof window!=='undefined') window.dispatchEvent(new CustomEvent<TaskStep>('jarvis-task-step',{detail:step})); });
     } catch (streamError) {
