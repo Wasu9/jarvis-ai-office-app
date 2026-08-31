@@ -1,12 +1,7 @@
 import React from 'react';
-import { OfficeSimulation3DRealistic } from './OfficeSimulation3DRealistic';
+import { OfficeSimulation3DGame } from './OfficeSimulation3DGame';
 import { AgentDefinition, TaskRecord } from '../types';
-
 interface Props { agents: AgentDefinition[]; activeTask: TaskRecord | null; }
-
-/** Real Three.js miniature-office renderer. No generated image is used. */
-export const OfficeSimulation3DHyperReal: React.FC<Props> = (props) => (
-  <OfficeSimulation3DRealistic {...props} />
-);
-
+/** Runtime Three.js miniature office. No generated image is used. */
+export const OfficeSimulation3DHyperReal: React.FC<Props> = (props) => <OfficeSimulation3DGame {...props} />;
 export default OfficeSimulation3DHyperReal;
