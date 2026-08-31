@@ -4,9 +4,10 @@ export interface AICompletionOptions {
   systemInstruction?: string;
   temperature?: number;
   responseMimeType?: string;
+  responseSchema?: Record<string, any>;
   inlineFiles?: Array<{
     mimeType: string;
-    data: string; // Base64
+    data: string;
   }>;
   model?: string;
 }
@@ -17,11 +18,12 @@ export interface AIProvider {
   generateText(prompt: string, options?: AICompletionOptions): Promise<string>;
 }
 
+const DEFAULT_MODEL = 'gemini-3.7-flash';
+const FALLBACK_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-2.5-flash'];
+
 export class GeminiProvider implements AIProvider {
   name = 'Gemini 3.7 Flash';
 
-  // Do not permanently cache the client or API key. In serverless environments,
-  // environment variables can be available after module initialization.
   private getApiKey(): string | undefined {
     const key = process.env.GEMINI_API_KEY;
     return typeof key === 'string' && key.trim().length > 0 ? key.trim() : undefined;
@@ -30,13 +32,10 @@ export class GeminiProvider implements AIProvider {
   private getClient(): GoogleGenAI | null {
     const apiKey = this.getApiKey();
     if (!apiKey) return null;
-
     return new GoogleGenAI({
       apiKey,
       httpOptions: {
-        headers: {
-          'User-Agent': 'aistudio-build',
-        },
+        headers: { 'User-Agent': 'jarvis-ai-office' },
       },
     });
   }
@@ -45,78 +44,74 @@ export class GeminiProvider implements AIProvider {
     return !!this.getApiKey();
   }
 
+  private classifyError(err: any): 'quota' | 'unavailable' | 'invalid' | 'other' {
+    const message = String(err?.message || err || '').toLowerCase();
+    const status = String(err?.status || err?.code || '').toLowerCase();
+    if (status.includes('resource_exhausted') || message.includes('resource_exhausted') || message.includes('quota')) return 'quota';
+    if (status.includes('503') || message.includes('503') || message.includes('unavailable') || message.includes('high demand')) return 'unavailable';
+    if (status.includes('400') || message.includes('invalid argument') || message.includes('not found')) return 'invalid';
+    return 'other';
+  }
+
   async generateText(prompt: string, options?: AICompletionOptions): Promise<string> {
-    // Resolve the environment variable at request time, not at module import time.
     const client = this.getClient();
     if (!client) {
-      throw new Error(
-        'Gemini API key is not configured in process.env.GEMINI_API_KEY. Please ensure the API key is set.'
-      );
+      throw new Error('Gemini API key is not configured on the deployed server. Add GEMINI_API_KEY to Vercel Production and Preview, then redeploy.');
     }
 
-    const requestedModel = options?.model || 'gemini-3.7-flash';
-    const fallbackModels = [requestedModel, 'gemini-2.5-flash', 'gemini-3.1-pro-preview'].filter(
-      (m, idx, arr) => arr.indexOf(m) === idx
-    );
-
+    const requestedModel = options?.model?.trim() || DEFAULT_MODEL;
+    const models = [requestedModel, ...FALLBACK_MODELS].filter((m, i, arr) => arr.indexOf(m) === i);
     const contentsParts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [];
 
-    // Add attached files if any (e.g. PDF, Images)
-    if (options?.inlineFiles && options.inlineFiles.length > 0) {
+    if (options?.inlineFiles?.length) {
       for (const file of options.inlineFiles) {
-        contentsParts.push({
-          inlineData: {
-            mimeType: file.mimeType,
-            data: file.data,
-          },
-        });
+        contentsParts.push({ inlineData: { mimeType: file.mimeType, data: file.data } });
       }
     }
-
-    // Add text prompt
-    contentsParts.push({
-      text: prompt,
-    });
+    contentsParts.push({ text: prompt });
 
     let lastError: any = null;
 
-    for (const currentModel of fallbackModels) {
-      // Try up to 2 attempts per model with backoff
-      for (let attempt = 1; attempt <= 2; attempt++) {
-        try {
-          const response = await client.models.generateContent({
-            model: currentModel,
-            contents: contentsParts.length === 1 && contentsParts[0].text ? contentsParts[0].text : { parts: contentsParts },
-            config: {
-              systemInstruction: options?.systemInstruction,
-              temperature: options?.temperature ?? 0.4,
-              responseMimeType: options?.responseMimeType,
-            },
-          });
+    for (const currentModel of models) {
+      try {
+        const response = await client.models.generateContent({
+          model: currentModel,
+          contents: contentsParts.length === 1 && contentsParts[0].text
+            ? contentsParts[0].text
+            : { parts: contentsParts },
+          config: {
+            systemInstruction: options?.systemInstruction,
+            temperature: options?.temperature ?? 0.35,
+            responseMimeType: options?.responseMimeType,
+            responseSchema: options?.responseSchema,
+          },
+        });
 
-          const outputText = response.text || '';
-          return outputText;
-        } catch (err: any) {
-          lastError = err;
-          const errMsg = err?.message || String(err);
-          const isRetryable =
-            errMsg.includes('503') ||
-            errMsg.includes('429') ||
-            errMsg.includes('high demand') ||
-            errMsg.includes('RESOURCE_EXHAUSTED') ||
-            errMsg.includes('UNAVAILABLE');
+        const outputText = response.text?.trim() || '';
+        if (!outputText) throw new Error(`Gemini returned an empty response from ${currentModel}.`);
+        return outputText;
+      } catch (err: any) {
+        lastError = err;
+        const kind = this.classifyError(err);
 
-          if (!isRetryable || (attempt === 2 && currentModel === fallbackModels[fallbackModels.length - 1])) {
-            break;
-          }
+        // A quota failure is not fixed by hammering the same request repeatedly.
+        // Move to the next model once; if all models are exhausted, return a clean message.
+        if (kind === 'quota') continue;
 
-          await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
-        }
+        // Retry transient capacity errors once on the next model. Do not retry malformed requests.
+        if (kind === 'invalid' || kind === 'other') break;
       }
     }
 
     console.error('[GeminiProvider Error]', lastError);
-    throw new Error(`AI Provider Error (${requestedModel}): ${lastError?.message || String(lastError)}`);
+    const kind = this.classifyError(lastError);
+    if (kind === 'quota') {
+      throw new Error('Gemini quota is currently exhausted for the configured project/model. Wait for the quota window to reset or enable billing/increase the Gemini API quota, then retry JARVIS.');
+    }
+    if (kind === 'invalid') {
+      throw new Error(`Gemini rejected the request. Check the selected model and request format. ${lastError?.message || ''}`.trim());
+    }
+    throw new Error(`Gemini could not complete the request. ${lastError?.message || String(lastError)}`.trim());
   }
 }
 
@@ -135,9 +130,7 @@ class ProviderRegistry {
   getProvider(key?: string): AIProvider {
     const targetKey = key || this.activeProviderKey;
     const provider = this.providers.get(targetKey) || this.providers.get('gemini');
-    if (!provider) {
-      throw new Error(`AI Provider '${targetKey}' not found.`);
-    }
+    if (!provider) throw new Error(`AI Provider '${targetKey}' not found.`);
     return provider;
   }
 
