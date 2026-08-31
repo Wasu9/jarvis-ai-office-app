@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { ArrowUp, Bot, BriefcaseBusiness, Coffee, FileText, MessageSquare, Plus, RotateCcw, Sparkles, Users, X, CheckCircle2, Clock3, Monitor, Send, UserRound } from 'lucide-react';
+import { ArrowUp, BriefcaseBusiness, Coffee, FileText, MessageSquare, RotateCcw, Users, X, CheckCircle2, Monitor, ClipboardList, Building2 } from 'lucide-react';
 import { AgentDefinition, AttachedFile, JarvisSettings, TaskRecord } from '../types';
 import { FileDropzone } from './FileDropzone';
 import { VoiceAssistant } from './VoiceAssistant';
@@ -7,18 +7,7 @@ import { TaskPipelineStepper } from './TaskPipelineStepper';
 import { ResultViewer } from './ResultViewer';
 import { ApiService } from '../services/api';
 
-interface Props {
-  agents: AgentDefinition[];
-  selectedAgentId: string;
-  setSelectedAgentId: (id: string) => void;
-  settings: JarvisSettings;
-  activeTask: TaskRecord | null;
-  setActiveTask: (t: TaskRecord | null) => void;
-  onTaskCompleted: (t: TaskRecord) => void;
-  onAgentHired?: () => void;
-  recentTasks: TaskRecord[];
-}
-
+interface Props { agents: AgentDefinition[]; selectedAgentId: string; setSelectedAgentId: (id: string) => void; settings: JarvisSettings; activeTask: TaskRecord | null; setActiveTask: (t: TaskRecord | null) => void; onTaskCompleted: (t: TaskRecord) => void; onAgentHired?: () => void; recentTasks: TaskRecord[]; }
 type Msg = { id: string; role: 'user' | 'assistant'; content: string };
 
 const quick = [
@@ -27,159 +16,65 @@ const quick = [
   ['DPP', 'Create a NEET DPP with questions, answer key and detailed solutions.'],
   ['Academy Notice', 'Create a professional Shaheen Academy Jaipur notice for an upcoming mock test.'],
 ];
-
-const people = ['🧑🏻‍💻', '👩🏻‍💻', '🧑🏽‍💻', '👨🏻‍🎨', '👩🏽‍🔬', '🧑🏻‍💼', '👨🏽‍💻', '👩🏻‍💻'];
-const desks = ['Paper Lab', 'Document Desk', 'DPP Desk', 'Design Studio', 'Research Desk', 'QA Desk', 'Media Desk', 'Data Desk'];
+const avatars = ['🧑🏻‍💻','👩🏻‍💻','🧑🏽‍💻','👨🏻‍🎨','👩🏽‍🔬','🧑🏻‍💼','👨🏽‍💻','👩🏻‍💻'];
+const rooms = ['PAPER LAB','DOCUMENT DESK','DPP ROOM','DESIGN STUDIO','RESEARCH ROOM','QA ROOM','MEDIA ROOM','DATA ROOM'];
 
 export const OfficeAssistant: React.FC<Props> = (p) => {
   const { agents, selectedAgentId, setSelectedAgentId, settings, activeTask, setActiveTask, onTaskCompleted, onAgentHired, recentTasks } = p;
-  const [messages, setMessages] = useState<Msg[]>([
-    { id: 'welcome', role: 'assistant', content: 'Good to see you, Boss. 👋 The office is open. Talk to me normally, or give me a real mission.' },
-  ]);
-  const [prompt, setPrompt] = useState('');
-  const [files, setFiles] = useState<AttachedFile[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [advanced, setAdvanced] = useState(false);
-  const [showChat, setShowChat] = useState(false);
-  const ref = useRef<HTMLTextAreaElement>(null);
-
-  const enabled = agents.filter((a) => a.enabled);
-  const completed = recentTasks.filter((t) => t.status === 'completed').length;
-  const activeIndex = activeTask ? Math.max(0, enabled.findIndex((a) => a.id === activeTask.agentId || a.name === activeTask.agentName)) : -1;
+  const [messages, setMessages] = useState<Msg[]>([{ id:'welcome', role:'assistant', content:'Good to see you, Boss. 👋 The office is open. Talk to me normally, or give me a real mission.' }]);
+  const [prompt, setPrompt] = useState(''); const [files, setFiles] = useState<AttachedFile[]>([]); const [busy, setBusy] = useState(false); const [advanced, setAdvanced] = useState(false); const ref = useRef<HTMLTextAreaElement>(null);
+  const enabled = agents.filter(a => a.enabled).slice(0,8); const completed = recentTasks.filter(t=>t.status==='completed').length;
+  const activeIndex = activeTask ? enabled.findIndex(a => a.id===activeTask.agentId || a.name===activeTask.agentName) : -1;
   const activeEmployee = activeIndex >= 0 ? enabled[activeIndex] : null;
-  const stage = activeTask?.status === 'completed' ? 'DELIVERED' : activeTask?.status === 'failed' ? 'NEEDS ATTENTION' : activeTask ? 'WORKING' : 'IDLE';
-
-  const reset = () => {
-    setMessages([{ id: Date.now().toString(), role: 'assistant', content: 'Fresh office session. ☕ Everyone is back at their desks. What shall we work on?' }]);
-    setPrompt('');
-    setFiles([]);
-    setActiveTask(null);
-    setShowChat(false);
+  const reset = () => { setMessages([{id:Date.now().toString(),role:'assistant',content:'Fresh office session. ☕ Everyone is back at their desks. What shall we work on?'}]); setPrompt(''); setFiles([]); setActiveTask(null); };
+  const send = async (custom?:string) => {
+    const text=(custom??prompt).trim(); if(!text&&!files.length)return; const userText=text||'Process the attached file.';
+    const history=messages.slice(-12).map(m=>({role:m.role,content:m.content})); setMessages(m=>[...m,{id:`u${Date.now()}`,role:'user',content:userText}]); setPrompt(''); setBusy(true);
+    const pending:TaskRecord={id:`p${Date.now()}`,title:userText.slice(0,70),userPrompt:userText,agentId:selectedAgentId==='auto'?'jarvis':'selected',agentName:'JARVIS',status:'understanding',createdAt:new Date().toISOString(),steps:[{status:'understanding',label:'JARVIS is understanding the mission',timestamp:new Date().toISOString()}],attachedFiles:[...files]}; setActiveTask(pending);
+    try { const t=await ApiService.executeTask({userPrompt:userText,selectedAgentId,attachedFiles:files,model:settings.aiModel,settings,history}); setActiveTask(t); if(t.agentId==='conversational-core'){setMessages(m=>[...m,{id:`a${Date.now()}`,role:'assistant',content:t.result?.rawText||'I am ready.'}]);setActiveTask(null);} else {if(t.steps?.some(s=>s.label.toLowerCase().includes('hr hired')))onAgentHired?.();onTaskCompleted(t);} }
+    catch(e:any){setActiveTask({...pending,status:'failed',error:e.message||'Something went wrong',completedAt:new Date().toISOString()});} finally{setBusy(false);setFiles([]);}
   };
 
-  const send = async (custom?: string) => {
-    const text = (custom ?? prompt).trim();
-    if (!text && !files.length) return;
-    const userText = text || 'Process the attached file.';
-    const history = messages.slice(-12).map((m) => ({ role: m.role, content: m.content }));
-    setMessages((m) => [...m, { id: `u${Date.now()}`, role: 'user', content: userText }]);
-    setPrompt('');
-    setBusy(true);
-    const pending: TaskRecord = {
-      id: `p${Date.now()}`,
-      title: userText.slice(0, 70),
-      userPrompt: userText,
-      agentId: selectedAgentId === 'auto' ? 'jarvis' : 'selected',
-      agentName: 'JARVIS',
-      status: 'understanding',
-      createdAt: new Date().toISOString(),
-      steps: [{ status: 'understanding', label: 'JARVIS is understanding the mission', timestamp: new Date().toISOString() }],
-      attachedFiles: [...files],
-    };
-    setActiveTask(pending);
-    try {
-      const t = await ApiService.executeTask({ userPrompt: userText, selectedAgentId, attachedFiles: files, model: settings.aiModel, settings, history });
-      setActiveTask(t);
-      if (t.agentId === 'conversational-core') {
-        setMessages((m) => [...m, { id: `a${Date.now()}`, role: 'assistant', content: t.result?.rawText || 'I am ready.' }]);
-        setActiveTask(null);
-      } else {
-        if (t.steps?.some((s) => s.label.toLowerCase().includes('hr hired'))) onAgentHired?.();
-        onTaskCompleted(t);
-      }
-    } catch (e: any) {
-      setActiveTask({ ...pending, status: 'failed', error: e.message || 'Something went wrong', completedAt: new Date().toISOString() });
-    } finally {
-      setBusy(false);
-      setFiles([]);
-    }
-  };
+  return <div className="mx-auto w-full max-w-[1700px] text-slate-200">
+    <style>{`
+      @keyframes float {0%,100%{transform:translateY(0)}50%{transform:translateY(-2px)}}
+      @keyframes walk {0%{transform:translate(0,0)}25%{transform:translate(var(--dx),var(--dy))}55%{transform:translate(var(--dx),var(--dy))}82%{transform:translate(0,0)}100%{transform:translate(0,0)}}
+      @keyframes type {0%,100%{transform:rotate(-2deg)}50%{transform:rotate(2deg)}}
+      @keyframes screen {0%,100%{opacity:.5}50%{opacity:1}}
+      @keyframes steam {0%{transform:translateY(4px);opacity:0}35%{opacity:.65}100%{transform:translateY(-14px);opacity:0}}
+      @keyframes bubble {0%,72%,100%{opacity:0;transform:translateY(5px)}12%,58%{opacity:1;transform:translateY(0)}}
+      @keyframes deliver {0%{opacity:0;transform:translateX(0)}35%{opacity:1}100%{opacity:0;transform:translateX(180px)}}
+      .person-idle{animation:float 3.4s ease-in-out infinite}.person-working{animation:walk 7s ease-in-out infinite}.person-working .person-body{animation:type .55s ease-in-out infinite}.screen-live{animation:screen 1.2s ease-in-out infinite}.steam{animation:steam 2.2s ease-in-out infinite}.bubble{animation:bubble 5s ease-in-out infinite}.delivery{animation:deliver 3s ease-in-out infinite}
+    `}</style>
 
-  const renderEmployee = (a: AgentDefinition, i: number) => {
-    const working = !!activeTask && (activeTask.agentId === a.id || activeTask.agentName === a.name);
-    const delivered = working && activeTask?.status === 'completed';
-    return (
-      <button
-        key={a.id}
-        onClick={() => setSelectedAgentId(a.id)}
-        className={`group relative min-h-[185px] rounded-[22px] border-2 p-3 text-left transition-all duration-300 ${working ? 'border-amber-300 bg-amber-100/[.07] shadow-[0_0_35px_rgba(251,191,36,.2)] -translate-y-1' : 'border-slate-700/80 bg-slate-900/90 hover:-translate-y-1 hover:border-cyan-300/50'}`}
-      >
-        <div className="absolute left-3 right-3 top-3 flex items-center justify-between">
-          <span className="rounded-full bg-black/30 px-2 py-1 text-[8px] font-bold uppercase tracking-wider text-slate-400">{desks[i % desks.length]}</span>
-          <span className={`h-2.5 w-2.5 rounded-full ${working ? 'animate-ping bg-amber-300' : 'bg-emerald-400'}`} />
-        </div>
-        <div className="mt-8 flex justify-center">
-          <div className={`relative flex h-16 w-16 items-center justify-center rounded-full border-2 ${working ? 'border-amber-300 bg-amber-200/10' : 'border-cyan-300/20 bg-cyan-300/10'} text-4xl shadow-lg`}>
-            {people[i % people.length]}
-            {working && <span className="absolute -right-3 bottom-0 animate-bounce text-lg">⚡</span>}
-          </div>
-        </div>
-        <div className="mt-2 text-center">
-          <div className="truncate text-[10px] font-bold text-white">{a.name}</div>
-          <div className="mt-0.5 text-[8px] text-slate-500">{working ? '⌨️ Working on your mission' : `${a.category} · available`}</div>
-        </div>
-        <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between rounded-xl bg-black/25 px-2 py-1.5 text-[8px] text-slate-500">
-          <span>{delivered ? '📦 Ready for Boss' : working ? '🖥️ Computer active' : i === 4 ? '☕ Coffee break' : '🪑 At workstation'}</span>
-          <Monitor className="h-3 w-3" />
-        </div>
-        {working && <div className="absolute bottom-0 left-4 right-4 h-1 overflow-hidden rounded-full bg-slate-800"><div className="h-full w-2/3 animate-pulse rounded-full bg-amber-300" /></div>}
-      </button>
-    );
-  };
+    <header className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-700 bg-[#101820] px-4 py-3 shadow-lg">
+      <div className="flex items-center gap-3"><div className="relative flex h-11 w-11 items-center justify-center rounded-xl bg-cyan-400/10 text-cyan-300"><Building2 className="h-6 w-6"/><span className="absolute right-0 top-0 h-2.5 w-2.5 rounded-full bg-emerald-400"/></div><div><div className="flex items-center gap-2 text-sm font-black text-white">SHAHEEN AI OFFICE <span className="rounded-full bg-emerald-400/10 px-2 py-0.5 text-[8px] text-emerald-300">OPEN</span></div><div className="text-[9px] text-slate-500">Living 2D workplace · Shaheen Academy Jaipur</div></div></div>
+      <div className="flex items-center gap-2 text-[9px] text-slate-500"><span>👥 {enabled.length} employees</span><span>•</span><span>📦 {completed} completed</span><button onClick={reset} className="rounded-lg border border-slate-700 px-3 py-1.5 text-slate-400 hover:text-white"><RotateCcw className="mr-1 inline h-3 w-3"/>Reset Office</button></div>
+    </header>
 
-  return (
-    <div className="mx-auto w-full max-w-[1600px] text-slate-200">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-700 bg-[#111923] px-4 py-3 shadow-lg">
-        <div className="flex items-center gap-3">
-          <div className="relative flex h-11 w-11 items-center justify-center rounded-xl bg-cyan-400/10 text-cyan-300"><BriefcaseBusiness className="h-6 w-6" /><span className="absolute right-0 top-0 h-2.5 w-2.5 rounded-full bg-emerald-400" /></div>
-          <div><div className="flex items-center gap-2 text-sm font-black text-white">SHAHEEN AI OFFICE <span className="rounded-full bg-emerald-400/10 px-2 py-0.5 text-[8px] text-emerald-300">OPEN</span></div><div className="text-[9px] text-slate-500">A living AI workplace · Shaheen Academy Jaipur</div></div>
+    <section className="relative overflow-hidden rounded-[28px] border-2 border-slate-600 bg-[#24303a] shadow-[0_30px_100px_rgba(0,0,0,.45)]">
+      <div className="relative flex items-center justify-between border-b border-slate-600 bg-[#2b3945] px-5 py-3"><div><div className="text-[11px] font-black uppercase tracking-[.22em] text-white">🏢 SHAHEEN AI OFFICE · LIVE FLOOR</div><div className="mt-1 text-[9px] text-slate-400">Real agents drive the scene — people move when work starts.</div></div><div className={`rounded-full border px-3 py-1 text-[9px] font-bold ${activeTask?'border-amber-300/40 bg-amber-300/10 text-amber-200':'border-emerald-300/20 bg-emerald-300/10 text-emerald-300'}`}>● {activeTask?'MISSION IN PROGRESS':'OFFICE OPEN'}</div></div>
+      <div className="relative min-h-[760px] overflow-hidden p-5 sm:p-7" style={{backgroundImage:'linear-gradient(rgba(255,255,255,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.035) 1px,transparent 1px)',backgroundSize:'52px 52px'}}>
+        <div className="absolute inset-x-8 top-[128px] h-px bg-slate-600/70"/><div className="absolute inset-x-8 bottom-[215px] h-px bg-slate-600/50"/>
+        <div className="absolute left-1/2 top-5 z-20 w-[190px] -translate-x-1/2 rounded-2xl border-2 border-cyan-300/30 bg-[#10212b] p-3 text-center shadow-xl"><div className="text-[8px] font-bold tracking-[.25em] text-slate-500">MANAGER ROOM</div><div className={`mx-auto mt-2 flex h-16 w-16 items-center justify-center rounded-full border-2 ${activeTask?'animate-pulse border-cyan-300 bg-cyan-300/10':'border-cyan-300/25 bg-cyan-300/5'} text-4xl`}>🤖</div><div className="mt-1 text-[10px] font-black text-cyan-200">JARVIS</div><div className="text-[8px] text-slate-500">Office Manager</div>{activeTask&&<div className="mt-2 rounded-lg bg-cyan-300/10 px-2 py-1 text-[8px] text-cyan-200">“Understood, Boss.”</div>}</div>
+
+        <div className="relative mt-[135px] grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
+          {enabled.map((a,i)=>{const working=!!activeTask&&(activeTask.agentId===a.id||activeTask.agentName===a.name);const coffee=!activeTask&&i===Math.min(4,enabled.length-1);return <div key={a.id} className={`relative h-[210px] overflow-visible rounded-2xl border-2 ${working?'border-amber-300/70 bg-amber-200/[.06]':'border-slate-600 bg-[#172331]'} shadow-xl`}>
+            <div className="absolute left-3 right-3 top-3 flex items-center justify-between"><span className="rounded bg-black/25 px-2 py-1 text-[8px] font-bold tracking-wider text-slate-400">{rooms[i]}</span><span className={`h-2.5 w-2.5 rounded-full ${working?'animate-ping bg-amber-300':'bg-emerald-400'}`}/></div>
+            <div className="absolute bottom-8 left-1/2 h-[70px] w-[150px] -translate-x-1/2 rounded-xl border border-slate-600 bg-[#49392d] shadow-inner"><div className="screen-live absolute left-1/2 top-[-39px] h-[56px] w-[82px] -translate-x-1/2 rounded-md border-4 border-slate-700 bg-[#061218] shadow-lg"><div className="m-2 h-1.5 rounded bg-cyan-300/50"/><div className="mx-2 mt-1 h-1 rounded bg-cyan-300/20"/><div className="mx-2 mt-1 h-1 w-1/2 rounded bg-emerald-300/30"/>{working&&<div className="absolute inset-x-2 bottom-2 h-1 overflow-hidden rounded bg-slate-800"><div className="h-full w-1/2 animate-pulse bg-cyan-300"/></div>}</div><div className="absolute left-1/2 top-2 h-7 w-16 -translate-x-1/2 rounded bg-[#151a20]"/><div className="absolute bottom-[-10px] left-1/2 h-3 w-20 -translate-x-1/2 rounded bg-slate-700"/></div>
+            <button onClick={()=>setSelectedAgentId(a.id)} className={`absolute bottom-[54px] left-1/2 z-10 -translate-x-1/2 ${working?'person-working':'person-idle'}`} style={{['--dx' as any]:`${(0.5-(i%4)/3)*42}vw`,['--dy' as any]:'-15vh'}}><div className="person-body relative flex h-16 w-16 items-center justify-center rounded-full border-2 border-cyan-300/25 bg-cyan-300/10 text-3xl">{avatars[i%avatars.length]}{working&&<span className="absolute -right-5 -top-1 rounded-full bg-amber-300 px-1.5 py-0.5 text-[8px] font-black text-slate-950">WORK</span>}{coffee&&<span className="absolute -right-5 -top-2 text-xl">☕</span>}</div>{working&&<div className="bubble absolute -top-12 left-1/2 w-40 -translate-x-1/2 rounded-xl border border-amber-300/20 bg-[#111a22] px-2 py-1.5 text-center text-[8px] text-amber-100 shadow-lg">🚶 Walking to JARVIS…</div>}</button>
+            {coffee&&<div className="steam absolute bottom-[95px] left-[63%] text-lg opacity-50">♨</div>}<div className="absolute left-3 top-12 max-w-[80%] truncate text-[9px] font-bold text-white">{a.name}</div><div className="absolute bottom-3 left-3 right-3 flex items-center justify-between text-[8px] text-slate-500"><span>{working?'🚶 On mission · computer active':coffee?'☕ Coffee break':'🪑 At workstation'}</span><Monitor className="h-3 w-3"/></div><div className="absolute bottom-0 left-4 right-4 h-0.5 rounded-full bg-slate-700"><div className={`h-full rounded-full ${working?'w-2/3 animate-pulse bg-amber-300':'w-1/4 bg-emerald-400/40'}`}/></div>
+          </div>})}
         </div>
-        <div className="flex items-center gap-2 text-[9px] text-slate-500"><span>👥 {enabled.length} employees</span><span>•</span><span>📦 {completed} completed</span><button onClick={reset} className="rounded-lg border border-slate-700 px-3 py-1.5 text-slate-400 hover:text-white"><RotateCcw className="mr-1 inline h-3 w-3" />Reset Office</button></div>
+
+        <div className="relative mx-auto mt-5 h-12 max-w-6xl rounded-full border border-slate-600 bg-[#202c36] shadow-inner"><div className="flex h-full items-center justify-around text-[8px] uppercase tracking-[.25em] text-slate-600"><span>EMPLOYEE FLOOR</span><span>JARVIS HALL</span><span>BOSS WING</span></div>{activeTask&&<div className="delivery absolute left-1/2 top-1/2 text-lg">📄</div>}</div>
+
+        <div className={`relative mx-auto mt-5 max-w-6xl rounded-2xl border-2 ${activeTask?.status==='completed'?'border-emerald-300/50 bg-emerald-200/[.06]':'border-amber-300/30 bg-[#2a241d]'} p-4 shadow-2xl`}><div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-3"><div className="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-200/10 text-2xl">🧑🏻‍💼</div><div><div className="text-xs font-black text-white">BOSS / CEO DESK</div><div className="text-[9px] text-amber-200/70">Your command area</div></div></div><div className="rounded-full bg-emerald-400/10 px-3 py-1 text-[8px] text-emerald-300">{activeTask?.status==='completed'?'📦 RESULT DELIVERED':'READY'}</div></div><div className="mt-4 grid gap-3 md:grid-cols-[1fr_auto_1fr] md:items-center"><div className="rounded-xl border border-amber-200/10 bg-black/20 p-3"><div className="flex items-center gap-2"><Coffee className="h-4 w-4 text-amber-200"/><span className="text-[9px] font-bold text-slate-300">BOSS DESK</span></div><div className="mt-1 text-[8px] text-slate-500">Give JARVIS a mission. He finds the right employee.</div></div><div className="text-center text-xl text-amber-200/50">→</div><div className="rounded-xl border border-amber-200/10 bg-black/20 p-3"><div className="text-[9px] font-bold text-slate-300">CURRENT MISSION</div><div className="mt-1 text-[10px] text-white">{activeTask?.title||'No active mission'}</div><div className="mt-1 text-[8px] text-slate-500">{activeTask?`${activeEmployee?.name||activeTask.agentName} is handling it.`:'The office is alive and waiting.'}</div></div></div></div>
+
+        {activeTask&&<div className="relative mx-auto mt-4 max-w-6xl rounded-xl border border-cyan-300/15 bg-[#0c151d] p-3"><div className="flex items-center gap-2 text-[9px] font-bold uppercase tracking-[.15em] text-cyan-200"><ClipboardList className="h-3.5 w-3.5"/>Live mission · {activeTask.agentName}</div><div className="mt-2"><TaskPipelineStepper task={activeTask} onRetry={()=>void send(activeTask.userPrompt)}/></div>{activeTask.status==='completed'&&activeTask.result&&<div className="mt-3 border-t border-white/10 pt-3"><ResultViewer task={activeTask} onRepeat={()=>setPrompt(activeTask.userPrompt)}/></div>}</div>}
       </div>
+    </section>
 
-      <div className="relative overflow-hidden rounded-[28px] border-2 border-slate-700 bg-[#18212b] shadow-[0_30px_100px_rgba(0,0,0,.45)]">
-        <div className="pointer-events-none absolute inset-0 opacity-20" style={{ backgroundImage: 'linear-gradient(rgba(148,163,184,.12) 1px,transparent 1px),linear-gradient(90deg,rgba(148,163,184,.12) 1px,transparent 1px)', backgroundSize: '48px 48px' }} />
-        <div className="relative flex items-center justify-between border-b border-slate-700 bg-[#202b37] px-5 py-3">
-          <div><div className="text-[11px] font-black uppercase tracking-[.22em] text-slate-200">🏢 THE JARVIS OFFICE FLOOR</div><div className="mt-1 text-[9px] text-slate-500">Watch your AI employees work. The scene reacts to real missions.</div></div>
-          <div className={`rounded-full border px-3 py-1 text-[9px] font-bold ${activeTask ? 'border-amber-300/30 bg-amber-300/10 text-amber-200' : 'border-emerald-300/20 bg-emerald-300/10 text-emerald-300'}`}>{activeTask ? '● MISSION IN PROGRESS' : '● OFFICE QUIET'}</div>
-        </div>
-
-        <div className="relative p-5 sm:p-7">
-          <div className="relative mx-auto mb-6 flex max-w-2xl flex-col items-center">
-            <div className="mb-2 text-[8px] uppercase tracking-[.3em] text-slate-600">MANAGER STATION</div>
-            <div className={`relative flex h-24 w-24 items-center justify-center rounded-full border-4 ${activeTask ? 'animate-pulse border-cyan-300 bg-cyan-300/10' : 'border-cyan-300/30 bg-cyan-300/5'} text-5xl shadow-[0_0_55px_rgba(34,211,238,.12)]`}>🤖<span className="absolute -bottom-4 rounded-full border border-slate-600 bg-[#111923] px-4 py-1 text-[9px] font-black tracking-widest text-cyan-200">JARVIS</span></div>
-            {activeTask && <div className="mt-6 rounded-2xl border border-cyan-300/20 bg-[#0c141d] px-4 py-2 text-center text-[9px] text-cyan-200 shadow-xl">“Understood, Boss.” <span className="text-slate-500">Assigning {activeEmployee?.name || 'the right employee'}…</span></div>}
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{enabled.slice(0, 8).map(renderEmployee)}</div>
-
-          <div className="mt-5 grid gap-4 lg:grid-cols-[1fr_300px]">
-            <section className="rounded-2xl border-2 border-amber-300/20 bg-[#241f18] p-4 shadow-xl">
-              <div className="flex items-center justify-between"><div className="flex items-center gap-3"><div className="flex h-11 w-11 items-center justify-center rounded-xl bg-amber-200/10 text-2xl">🧑🏻‍💼</div><div><div className="text-xs font-black text-white">BOSS / CEO DESK</div><div className="text-[9px] text-amber-200/70">Your command area</div></div></div><div className="rounded-full bg-emerald-400/10 px-2 py-1 text-[8px] text-emerald-300">READY</div></div>
-              <div className="mt-4 flex items-center gap-3 rounded-xl border border-amber-200/10 bg-black/20 p-3"><div className="text-2xl">☕</div><div className="flex-1"><div className="text-[9px] font-bold text-slate-300">Today's office</div><div className="mt-1 text-[8px] text-slate-500">{activeTask ? `${activeTask.agentName} is handling your mission.` : 'Employees are available. Give JARVIS a mission.'}</div></div><div className="text-right"><div className="text-lg font-bold text-white">{completed}</div><div className="text-[7px] text-slate-600">DONE</div></div></div>
-            </section>
-
-            <aside className="rounded-2xl border-2 border-slate-700 bg-[#101821] p-4">
-              <div className="mb-3 flex items-center gap-2 text-[10px] font-black uppercase tracking-wider text-slate-300"><Clock3 className="h-4 w-4 text-cyan-300" />Live Mission Board</div>
-              {activeTask ? <><div className="rounded-xl border border-amber-300/20 bg-amber-300/5 p-3"><div className="text-[8px] uppercase tracking-widest text-amber-200">{stage}</div><div className="mt-1 text-[10px] font-bold text-white">{activeTask.title}</div><div className="mt-2 text-[8px] text-slate-500">{activeTask.status === 'completed' ? '📦 Result delivered to Boss desk' : `🤖 ${activeTask.agentName} · working now`}</div></div><div className="mt-3 flex items-center justify-between text-[8px] text-slate-500"><span>JARVIS</span><span>→</span><span>{activeEmployee?.name || 'Specialist'}</span><span>→</span><span>Boss</span></div></> : <div className="rounded-xl border border-slate-700 bg-black/10 p-3 text-[8px] leading-4 text-slate-500">No active mission. Employees are at their workstations; one is enjoying a coffee break.</div>}
-              {recentTasks.slice(0, 3).map((t) => <button key={t.id} onClick={() => setActiveTask(t)} className="mt-2 flex w-full items-center gap-2 rounded-xl border border-slate-700 bg-black/10 p-2 text-left"><CheckCircle2 className="h-3.5 w-3.5 text-emerald-300" /><span className="truncate text-[8px] text-slate-400">{t.title}</span></button>)}
-            </aside>
-          </div>
-        </div>
-      </div>
-
-      {activeTask && <div className="relative mt-4 rounded-2xl border-2 border-cyan-300/15 bg-[#0c141c] p-3"><div className="mb-2 flex items-center justify-between"><div className="text-[9px] font-bold uppercase tracking-widest text-cyan-200">⚡ Live work details · {activeTask.agentName}</div><button onClick={() => setShowChat((v) => !v)} className="rounded-lg border border-slate-700 px-2 py-1 text-[8px] text-slate-500">{showChat ? 'Hide' : 'Show'} conversation</button></div><TaskPipelineStepper task={activeTask} onRetry={() => void send(activeTask.userPrompt)} />{activeTask.status === 'completed' && activeTask.result && <div className="mt-3 border-t border-slate-700 pt-3"><ResultViewer task={activeTask} onRepeat={() => setPrompt(activeTask.userPrompt)} /></div>}</div>}
-
-      <div className="mt-4 rounded-[22px] border-2 border-slate-700 bg-[#111923] p-3 shadow-xl">
-        <div className="mb-2 flex items-center justify-between px-2"><div className="flex items-center gap-2 text-[9px] font-bold text-slate-400"><UserRound className="h-3 w-3 text-cyan-300" />BOSS COMMAND DESK</div><div className="text-[8px] text-slate-600">Talk normally · JARVIS decides whether to chat or assign work</div></div>
-        {showChat && <div className="mb-3 max-h-52 space-y-2 overflow-y-auto rounded-xl border border-slate-700 bg-[#0a1017] p-3">{messages.map((m) => <div key={m.id} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}><div className={`max-w-[85%] rounded-xl px-3 py-2 text-[10px] leading-5 ${m.role === 'user' ? 'bg-cyan-400 text-slate-950' : 'border border-slate-700 bg-[#17212c] text-slate-200'}`}>{m.content}</div></div>)}{busy && <div className="text-[9px] text-cyan-300">JARVIS is thinking… ● ● ●</div>}</div>}
-        <div className="rounded-2xl border border-slate-700 bg-[#0a1118] focus-within:border-cyan-300/40">
-          {files.length > 0 && <div className="flex flex-wrap gap-2 px-3 pt-3">{files.map((f) => <div key={f.id} className="rounded-lg border border-cyan-300/20 px-2 py-1 text-[8px] text-cyan-200"><FileText className="mr-1 inline h-3 w-3" />{f.name}<button onClick={() => setFiles((x) => x.filter((y) => y.id !== f.id))}><X className="ml-1 inline h-3 w-3" /></button></div>)}</div>}
-          <textarea ref={ref} value={prompt} onChange={(e) => setPrompt(e.target.value)} onFocus={() => setShowChat(true)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(); } }} rows={2} placeholder="Boss, what should we work on?" className="w-full resize-none bg-transparent px-4 py-3 text-sm text-white outline-none placeholder:text-slate-600" disabled={busy} />
-          <div className="flex items-center justify-between px-3 pb-2"><div className="flex flex-wrap items-center gap-1.5"><FileDropzone attachedFiles={files} onAddFiles={(x) => setFiles((v) => [...v, ...x])} onRemoveFile={(id) => setFiles((v) => v.filter((x) => x.id !== id))} disabled={busy} /><VoiceAssistant onSpeechResult={(t) => setPrompt((x) => x ? `${x} ${t}` : t)} isProcessing={busy} />{advanced ? <select value={selectedAgentId} onChange={(e) => setSelectedAgentId(e.target.value)} className="rounded-lg border border-slate-700 bg-[#121922] px-2 py-1.5 text-[8px] text-slate-400"><option value="auto">JARVIS Auto-Assign</option>{agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select> : <button onClick={() => setAdvanced(true)} className="rounded-lg border border-slate-700 px-2 py-1.5 text-[8px] text-slate-600 hover:text-slate-300"><Plus className="mr-1 inline h-3 w-3" />Assign</button>}</div><button onClick={() => void send()} disabled={busy || (!prompt.trim() && !files.length)} className="flex h-10 w-10 items-center justify-center rounded-xl bg-cyan-400 text-slate-950 disabled:opacity-30"><Send className="h-4 w-4" /></button></div>
-        </div>
-        <div className="mt-3 flex flex-wrap gap-2">{quick.map(([label, text]) => <button key={label} onClick={() => { setPrompt(text); setShowChat(true); ref.current?.focus(); }} className="rounded-full border border-slate-700 bg-[#0d141c] px-3 py-1.5 text-[8px] text-slate-500 hover:border-cyan-300/30 hover:text-cyan-200"><Sparkles className="mr-1 inline h-3 w-3" />{label}</button>)}</div>
-      </div>
-    </div>
-  );
+    <section className="mt-3 rounded-2xl border border-slate-700 bg-[#0f171f] p-3 shadow-xl"><div className="flex items-end gap-2"><div className="min-w-0 flex-1 rounded-2xl border border-slate-700 bg-[#101923] focus-within:border-cyan-300/40">{files.length>0&&<div className="flex flex-wrap gap-2 px-3 pt-3">{files.map(f=><div key={f.id} className="rounded-lg border border-cyan-400/15 px-2 py-1 text-[9px] text-cyan-200"><FileText className="mr-1 inline h-3 w-3"/>{f.name}<button onClick={()=>setFiles(x=>x.filter(y=>y.id!==f.id))}><X className="ml-1 inline h-3 w-3"/></button></div>)}</div>}<textarea ref={ref} value={prompt} onChange={e=>setPrompt(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();void send();}}} rows={2} placeholder="Boss, what should the office work on?" className="w-full resize-none bg-transparent px-4 py-3 text-sm text-white outline-none placeholder:text-slate-600" disabled={busy}/><div className="flex items-center gap-2 px-3 pb-2"><FileDropzone attachedFiles={files} onAddFiles={x=>setFiles(v=>[...v,...x])} onRemoveFile={id=>setFiles(v=>v.filter(x=>x.id!==id))} disabled={busy}/><VoiceAssistant onSpeechResult={t=>setPrompt(x=>x?`${x} ${t}`:t)} isProcessing={busy}/>{advanced&&<select value={selectedAgentId} onChange={e=>setSelectedAgentId(e.target.value)} className="rounded-lg border border-slate-700 bg-[#111923] px-2 py-1.5 text-[9px] text-slate-400"><option value="auto">JARVIS decides</option>{agents.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select>}<button onClick={()=>setAdvanced(v=>!v)} className="ml-auto text-[9px] text-slate-600 hover:text-cyan-200">{advanced?'Hide controls':'Controls'}</button></div></div><button onClick={()=>void send()} disabled={busy||(!prompt.trim()&&!files.length)} className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-cyan-300 text-slate-950 disabled:opacity-30"><ArrowUp className="h-5 w-5"/></button></div><div className="mt-2 flex flex-wrap gap-2">{quick.map(([label,text])=><button key={label} onClick={()=>{setPrompt(text);ref.current?.focus();}} className="rounded-full border border-slate-700 bg-white/[.02] px-3 py-1.5 text-[9px] text-slate-400 hover:border-cyan-300/25 hover:text-cyan-200">{label}</button>)}<span className="ml-auto text-[9px] text-slate-600"><MessageSquare className="mr-1 inline h-3 w-3"/>Talk naturally with JARVIS</span></div></section>
+    </div>;
 };
