@@ -60,9 +60,7 @@ export class ApiService {
   }
 
   static async deleteAgent(id: string): Promise<boolean> {
-    const res = await fetch(`/api/agents/${id}`, {
-      method: 'DELETE',
-    });
+    const res = await fetch(`/api/agents/${id}`, { method: 'DELETE' });
     const data = await res.json();
     return data.success;
   }
@@ -84,17 +82,13 @@ export class ApiService {
   }
 
   static async deleteMemory(id: string): Promise<boolean> {
-    const res = await fetch(`/api/memory/${id}`, {
-      method: 'DELETE',
-    });
+    const res = await fetch(`/api/memory/${id}`, { method: 'DELETE' });
     const data = await res.json();
     return data.success;
   }
 
   static async clearAllMemory(): Promise<boolean> {
-    const res = await fetch('/api/memory/clear', {
-      method: 'POST',
-    });
+    const res = await fetch('/api/memory/clear', { method: 'POST' });
     const data = await res.json();
     return data.success;
   }
@@ -120,11 +114,8 @@ export class ApiService {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params),
     });
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.error || 'Failed to execute task');
-    }
     const data = await res.json();
+    if (!res.ok) throw new Error(data.error || data.task?.error || 'Failed to execute task');
     return data.task;
   }
 }
