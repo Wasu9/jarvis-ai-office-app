@@ -1,10 +1,31 @@
-import React from 'react';
-import {OfficeSimulation3DGameV2} from './OfficeSimulation3DGameV2';
-import {MobileGameControls} from './MobileGameControls';
+import React,{useState}from'react';
+import {OfficeSimulation3DGameV2}from'./OfficeSimulation3DGameV2';
+import {MobileGameControls}from'./MobileGameControls';
 
-export const OfficeSimulation3DGame:React.FC<React.ComponentProps<typeof OfficeSimulation3DGameV2>>=(props)=><div className="relative w-full">
-  <OfficeSimulation3DGameV2 {...props}/>
-  <MobileGameControls/>
-</div>;
-
+export const OfficeSimulation3DGame:React.FC<React.ComponentProps<typeof OfficeSimulation3DGameV2>>=({agents,activeTask})=>{
+ const [view,setView]=useState<'top'|'3d'>('3d');const [selected,setSelected]=useState('');
+ const changeView=(v:'top'|'3d')=>{setView(v);window.dispatchEvent(new CustomEvent('office-top-view',{detail:v==='top'}))};
+ const status=(a:any)=>activeTask&&((activeTask as any).agentId===a.id||(activeTask as any).agentName===a.name)?'WORKING':'ONLINE';
+ return <div className="relative w-full overflow-hidden rounded-2xl border border-slate-700/70 bg-[#05090e] shadow-2xl">
+  <div className="relative z-40 flex min-h-[64px] items-center justify-between border-b border-white/10 bg-[#070c12]/95 px-4 py-3 backdrop-blur-xl sm:px-6">
+   <div><div className="flex items-center gap-2 text-sm font-black tracking-wide text-white"><span className="text-lg">🏢</span> SHAHEEN <span className="text-cyan-300">AI OFFICE</span><span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2 py-0.5 text-[8px] font-bold text-emerald-300">LIVE · 3D</span></div><div className="mt-0.5 text-[9px] text-slate-400">Shaheen Academy Jaipur · {agents.length} AI employees · {activeTask?'1 active mission':'0 missions completed'}</div></div>
+   <div className="hidden items-center gap-4 md:flex"><div className="text-right"><div className="text-[9px] text-slate-500">SYSTEM</div><div className="text-[10px] font-bold text-emerald-300">● ONLINE</div></div><button onClick={()=>window.location.reload()} className="rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-[9px] font-bold text-slate-200 hover:bg-white/10">↻ RESET OFFICE</button></div>
+  </div>
+  <div className="relative h-[600px] sm:h-[680px]">
+   <OfficeSimulation3DGameV2 agents={agents} activeTask={activeTask}/><MobileGameControls/>
+   <div className="pointer-events-none absolute left-3 top-3 z-30 w-[190px] rounded-xl border border-white/10 bg-[#070d14]/90 p-3 shadow-2xl backdrop-blur-xl lg:w-52">
+    <div className="mb-3 text-[9px] font-black tracking-[.18em] text-slate-200">OFFICE STATUS</div>
+    <div className="grid grid-cols-2 gap-1.5"><div className="rounded-lg bg-white/[.045] p-2"><b className="text-base text-cyan-300">{agents.length}</b><div className="text-[7px] uppercase tracking-wider text-slate-500">Employees</div></div><div className="rounded-lg bg-white/[.045] p-2"><b className="text-base text-amber-300">{activeTask?1:0}</b><div className="text-[7px] uppercase tracking-wider text-slate-500">Missions</div></div><div className="rounded-lg bg-white/[.045] p-2"><b className="text-base text-emerald-300">100%</b><div className="text-[7px] uppercase tracking-wider text-slate-500">Efficiency</div></div><div className="rounded-lg bg-white/[.045] p-2"><b className="text-base text-emerald-300">●</b><div className="text-[7px] uppercase tracking-wider text-slate-500">Online</div></div></div>
+    <div className="my-3 h-px bg-white/10"/><div className="text-[8px] font-bold tracking-widest text-slate-400">AI EMPLOYEES</div><div className="mt-2 space-y-1">{agents.slice(0,6).map(a=><button key={a.id} onClick={()=>setSelected(a.name)} className={`pointer-events-auto flex w-full items-center gap-2 rounded-lg p-1.5 text-left transition ${selected===a.name?'bg-cyan-400/15 ring-1 ring-cyan-300/20':'hover:bg-white/5'}`}><span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-slate-600 to-slate-900 text-[9px] font-black text-white ring-1 ring-white/10">{a.name.slice(0,1).toUpperCase()}</span><span className="min-w-0 flex-1"><span className="block truncate text-[8px] font-bold text-white">{a.name}</span><span className={`block text-[7px] ${status(a)==='WORKING'?'text-cyan-300':'text-emerald-300'}`}>{status(a)} · {a.role||'AI Agent'}</span></span><span className="text-[8px] text-emerald-300">●</span></button>)}</div>
+   </div>
+   <div className="pointer-events-auto absolute right-3 top-3 z-30 hidden w-48 rounded-xl border border-white/10 bg-[#070d14]/90 p-3 shadow-2xl backdrop-blur-xl lg:block">
+    <div className="flex rounded-lg bg-black/40 p-1"><button onClick={()=>changeView('top')} className={`flex-1 rounded-md py-2 text-[8px] font-black ${view==='top'?'bg-cyan-400/20 text-cyan-200':'text-slate-500'}`}>TOP VIEW</button><button onClick={()=>changeView('3d')} className={`flex-1 rounded-md py-2 text-[8px] font-black ${view==='3d'?'bg-cyan-400/20 text-cyan-200':'text-slate-500'}`}>3D VIEW</button></div>
+    <div className="mt-4 text-[8px] font-black tracking-widest text-slate-400">CAMERA</div><div className="mt-2 flex justify-between text-[8px] text-slate-500"><span>Mode</span><span className="text-cyan-300">{view==='top'?'OVERVIEW':'FOLLOW'}</span></div><div className="mt-2 h-1 rounded-full bg-white/10"><div className="h-1 w-2/3 rounded-full bg-cyan-400/70"/></div><div className="mt-3 text-[8px] text-slate-500">Drag to orbit · scroll to zoom</div>
+    <div className="my-4 h-px bg-white/10"/><div className="text-[8px] font-black tracking-widest text-slate-400">DISPLAY</div><div className="mt-2 flex justify-between text-[8px] text-slate-400"><span>Employee names</span><span className="text-emerald-300">ON</span></div><div className="mt-2 flex justify-between text-[8px] text-slate-400"><span>Task activity</span><span className="text-cyan-300">LIVE</span></div><div className="mt-2 flex justify-between text-[8px] text-slate-400"><span>Lighting</span><span className="text-amber-300">CINEMATIC</span></div>
+   </div>
+   <div className="pointer-events-none absolute bottom-4 left-1/2 z-30 -translate-x-1/2 rounded-xl border border-white/10 bg-[#070d14]/85 px-4 py-2 text-[8px] font-medium tracking-wide text-slate-300 shadow-xl backdrop-blur-xl">WASD MOVE · SHIFT SPRINT · SPACE JUMP · DRAG CAMERA · {view==='top'?'TOP-DOWN OVERVIEW':'3D FOLLOW CAMERA'}</div>
+  </div>
+  <div className="flex items-center justify-between border-t border-white/10 bg-[#070c12] px-5 py-3 text-[9px] text-slate-500"><span>{selected?`SELECTED: ${selected}`:'SELECT AN EMPLOYEE TO INSPECT'}</span><span className="text-emerald-300">● JARVIS ONLINE</span></div>
+ </div>;
+};
 export default OfficeSimulation3DGame;
