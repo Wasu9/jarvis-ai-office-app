@@ -1,10 +1,12 @@
 import { JarvisMemoryItem } from '../src/types/index.js';
+import { loadMemories } from './persistence.js';
 
 class MemoryStore {
   private memories: Map<string, JarvisMemoryItem> = new Map();
 
   constructor() {
     this.seedDefaultMemories();
+    this.restorePersistedMemories();
   }
 
   private seedDefaultMemories() {
@@ -12,17 +14,12 @@ class MemoryStore {
       {
         category: 'institute',
         key: 'institute_name',
-        value: 'Apex NEET & JEE Institute of Excellence',
+        value: 'Shaheen Academy Jaipur',
       },
       {
         category: 'institute',
         key: 'tagline',
-        value: 'Transforming Aspirations into Ranks',
-      },
-      {
-        category: 'institute',
-        key: 'contact_info',
-        value: 'Helpline: +91 98765 43210 | Kota, Rajasthan',
+        value: 'NEET & JEE preparation with AI-assisted academic operations',
       },
       {
         category: 'academic_preference',
@@ -46,6 +43,22 @@ class MemoryStore {
     });
   }
 
+  private restorePersistedMemories() {
+    const saved = loadMemories();
+    if (!saved.length) return;
+    this.memories.clear();
+    for (const item of saved) {
+      const id = item.id || `mem-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      this.memories.set(id, {
+        category: item.category,
+        key: item.key,
+        value: item.value,
+        id,
+        updatedAt: item.updatedAt || new Date().toISOString(),
+      });
+    }
+  }
+
   getAll(): JarvisMemoryItem[] {
     return Array.from(this.memories.values());
   }
@@ -55,7 +68,7 @@ class MemoryStore {
   }
 
   set(item: Omit<JarvisMemoryItem, 'id' | 'updatedAt'> & { id?: string }): JarvisMemoryItem {
-    const id = item.id || `mem-${Date.now()}`;
+    const id = item.id || `mem-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const entry: JarvisMemoryItem = {
       ...item,
       id,
