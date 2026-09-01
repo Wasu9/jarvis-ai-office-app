@@ -1,5 +1,5 @@
 import React,{useState}from'react';
-import {OfficeSimulation3DGameV2}from'./OfficeSimulation3DGameV2';
+import OfficeSimulation3DGameV2 from'./OfficeSimulation3DGameV2';
 import {MobileGameControls}from'./MobileGameControls';
 
 export const OfficeSimulation3DGame:React.FC<React.ComponentProps<typeof OfficeSimulation3DGameV2>>=({agents,activeTask})=>{
