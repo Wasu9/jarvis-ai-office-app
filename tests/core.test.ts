@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import '../server/agents/agency-bootstrap.js';
 import { TaskRunner } from '../server/task-runner.js';
 import { agentRegistry } from '../server/agents/definitions.js';
 
