@@ -1,17 +1,22 @@
 import { agentRegistry } from './definitions.js';
 import { AGENCY_LIBRARY_AGENTS } from './agency-library.js';
+import { loadCustomAgents } from '../persistence.js';
 
 /**
- * Install curated Agency Agents into JARVIS without replacing the existing
- * built-in agents or changing the AgentRegistry implementation.
- *
- * The registry's customAgents map is intentionally private, so we expose the
- * library through small instance-level wrappers. This also makes the
- * integration deterministic in bundled/serverless builds.
+ * Bootstrap curated agency agents plus user-created local agents.
+ * User-created agents are persisted for the local zero-cost deployment;
+ * persistence failure must never prevent the server from starting.
  */
+for (const saved of loadCustomAgents()) {
+  try {
+    if (saved.id && !saved.id.startsWith('agency-')) agentRegistry.addCustomAgent(saved as any);
+  } catch (error) {
+    console.warn('[JARVIS] Could not restore custom agent:', saved.id, error);
+  }
+}
+
 const originalGetAllAgents = agentRegistry.getAllAgents.bind(agentRegistry);
 const originalGetAgent = agentRegistry.getAgent.bind(agentRegistry);
-
 const agencyById = new Map(AGENCY_LIBRARY_AGENTS.map((agent) => [agent.id, agent]));
 
 agentRegistry.getAllAgents = () => [

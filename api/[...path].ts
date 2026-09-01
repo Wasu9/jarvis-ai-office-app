@@ -1,9 +1,11 @@
 import express from 'express';
+import '../server/agents/agency-bootstrap.js';
 import { agentRegistry } from '../server/agents/definitions.js';
 import { memoryStore } from '../server/memory.js';
 import { TaskRunner } from '../server/task-runner.js';
 import { aiRegistry } from '../server/ai/provider.js';
 import { generateDocxBuffer } from '../server/docx-generator.js';
+import { saveCustomAgents, saveMemories, persistenceInfo } from '../server/persistence.js';
 
 const app = express();
 app.use(express.json({ limit: '50mb' }));
@@ -17,6 +19,7 @@ app.use((req, _res, next) => {
 
 app.get('/api/health', (_req, res) => res.json({
   status: 'ok', service: 'JARVIS AI Office', timestamp: new Date().toISOString(), aiConfigured: !!process.env.GEMINI_API_KEY,
+  persistence: persistenceInfo(),
 }));
 
 app.get('/api/providers', (_req, res) => res.json({
@@ -30,29 +33,48 @@ app.post('/api/agents', (req, res) => {
     const { name, description, capabilities, systemPrompt, inputRequirements, outputTypes, iconName } = req.body;
     if (!name || !systemPrompt) return res.status(400).json({ error: 'Name and System Prompt are required' });
     const newAgent = agentRegistry.addCustomAgent({ name, description: description || 'Custom AI Agent', capabilities: capabilities || ['custom'], systemPrompt, inputRequirements: inputRequirements || ['User instructions'], outputTypes: outputTypes || ['markdown', 'docx'], category: 'custom', enabled: true, iconName: iconName || 'Bot', samplePrompts: [] });
+    saveCustomAgents(agentRegistry.getAllAgents().filter((a) => a.isCustom && !a.id.startsWith('agency-')));
     res.status(201).json({ agent: newAgent });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
 app.put('/api/agents/:id', (req, res) => {
-  try { const updated = agentRegistry.updateAgent(req.params.id, req.body); if (!updated) return res.status(404).json({ error: 'Agent not found' }); res.json({ agent: updated }); }
-  catch (err: any) { res.status(500).json({ error: err.message }); }
+  try {
+    const updated = agentRegistry.updateAgent(req.params.id, req.body);
+    if (!updated) return res.status(404).json({ error: 'Agent not found' });
+    saveCustomAgents(agentRegistry.getAllAgents().filter((a) => a.isCustom && !a.id.startsWith('agency-')));
+    res.json({ agent: updated });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
 app.delete('/api/agents/:id', (req, res) => {
-  try { const deleted = agentRegistry.deleteCustomAgent(req.params.id); if (!deleted) return res.status(404).json({ error: 'Agent not found or cannot delete built-in agent' }); res.json({ success: true }); }
-  catch (err: any) { res.status(500).json({ error: err.message }); }
+  try {
+    const deleted = agentRegistry.deleteCustomAgent(req.params.id);
+    if (!deleted) return res.status(404).json({ error: 'Agent not found or cannot delete built-in agent' });
+    saveCustomAgents(agentRegistry.getAllAgents().filter((a) => a.isCustom && !a.id.startsWith('agency-')));
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
 app.get('/api/memory', (_req, res) => res.json({ memories: memoryStore.getAll() }));
 app.post('/api/memory', (req, res) => {
-  try { const { category, key, value, id } = req.body; if (!key || !value) return res.status(400).json({ error: 'Key and Value are required' }); res.status(201).json({ memory: memoryStore.set({ id, category: category || 'custom', key, value }) }); }
+  try {
+    const { category, key, value, id } = req.body;
+    if (!key || !value) return res.status(400).json({ error: 'Key and Value are required' });
+    const memory = memoryStore.set({ id, category: category || 'custom', key, value });
+    saveMemories(memoryStore.getAll());
+    res.status(201).json({ memory });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+app.delete('/api/memory/:id', (req, res) => {
+  try { const success = memoryStore.delete(req.params.id); saveMemories(memoryStore.getAll()); res.json({ success }); }
   catch (err: any) { res.status(500).json({ error: err.message }); }
 });
-app.delete('/api/memory/:id', (req, res) => { try { res.json({ success: memoryStore.delete(req.params.id) }); } catch (err: any) { res.status(500).json({ error: err.message }); } });
-app.post('/api/memory/clear', (_req, res) => { try { memoryStore.clear(); res.json({ success: true }); } catch (err: any) { res.status(500).json({ error: err.message }); } });
+app.post('/api/memory/clear', (_req, res) => {
+  try { memoryStore.clear(); saveMemories([]); res.json({ success: true }); }
+  catch (err: any) { res.status(500).json({ error: err.message }); }
+});
 
-// Lightweight, human-style conversation endpoint. This must stay separate from the heavy task runner.
 app.post('/api/chat', async (req, res) => {
   try {
     const message = String(req.body?.message || '').trim();
