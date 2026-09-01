@@ -32,11 +32,6 @@ function cleanText(text:string):string{
   return convertMathToUnicode(s);
 }
 
-function dedupeSame(a:string,b:string):[string,string]{
-  const x=cleanText(a),y=cleanText(b);
-  return x===y?[x,'']:[x,y];
-}
-
 function makeRuns(text:string,options:{bold?:boolean;size?:number;color?:string;hindi?:boolean}={}):TextRun[]{
   const cleaned=cleanText(text);
   return [new TextRun({text:cleaned,bold:options.bold,size:options.size||20,color:options.color,font:options.hindi?'Noto Sans Devanagari':'Aptos'})];
@@ -48,11 +43,11 @@ function questionTable(q:NonNullable<DocxPaperData['questions']>[number]):Table{
   const english:Paragraph[]=[textParagraph(q.textEn,{bold:true,size:21,color:'0F172A'})];
   const hindi:Paragraph[]=[textParagraph(q.textHi||'',{bold:true,size:21,color:'334155',hindi:true})];
   const en=q.optionsEn||[],hi=q.optionsHi||[];
-  for(let i=0;i<Math.max(en.length,hi.length);i++){
+  for(let i=0;i<4;i++){
     const letter=String.fromCharCode(65+i);
-    const [enText,hiText]=dedupeSame(en[i]||'',hi[i]||'');
-    if(enText) english.push(textParagraph(`(${letter}) ${enText}`,{size:19}));
-    if(hiText) hindi.push(textParagraph(`(${letter}) ${hiText}`,{size:19,hindi:true}));
+    // Always render both language columns. Never hide a Hindi option because it resembles English.
+    english.push(textParagraph(`(${letter}) ${en[i]||''}`,{size:19}));
+    hindi.push(textParagraph(`(${letter}) ${hi[i]||''}`,{size:19,hindi:true}));
   }
   const rows:TableRow[]=[new TableRow({children:[cell([textParagraph('ENGLISH',{bold:true,size:17,color:'FFFFFF',align:AlignmentType.CENTER})],50,'1E3A8A'),cell([textParagraph('हिन्दी',{bold:true,size:17,color:'FFFFFF',hindi:true,align:AlignmentType.CENTER})],50,'1E3A8A')]}),new TableRow({children:[cell(english,50,'F8FAFC'),cell(hindi,50,'F8FAFC')]})];
   if(q.diagramSvg && !/^\s*(svg)?\s*$/i.test(q.diagramSvg)){
@@ -69,6 +64,7 @@ export async function generateDocxBuffer(data:DocxPaperData):Promise<Buffer>{
     children.push(textParagraph('GENERAL INSTRUCTIONS / सामान्य निर्देश:',{bold:true,size:20,color:'334155'}));
     const instructions=data.instructions?.length?data.instructions:['1. All questions are compulsory. Each correct answer carries +4 marks.','2. For each incorrect answer, 1 mark will be deducted (-1 negative marking).','3. Read both English and Hindi versions carefully before answering.'];
     for(const instruction of instructions)children.push(textParagraph(instruction,{size:18,color:'475569'}));
+    // Question number is a compact inline heading, not a repeated ENGLISH/HINDI header.
     for(const q of questions){children.push(textParagraph(`Q.${q.number}`,{bold:true,size:22,color:'1E293B'}));children.push(questionTable(q));children.push(new Paragraph({spacing:{after:120},children:[]}));}
     const keyed=questions.filter(q=>q.correctOption);if(keyed.length){children.push(textParagraph('ANSWER KEY / उत्तर कुंजी',{bold:true,size:24,color:'1E3A8A',align:AlignmentType.CENTER}));const width=100/Math.min(10,keyed.length);children.push(new Table({width:{size:100,type:WidthType.PERCENTAGE},rows:[new TableRow({children:keyed.map(q=>cell([textParagraph(`Q.${q.number}`,{bold:true,size:17,align:AlignmentType.CENTER})],width,'E2E8F0'))}),new TableRow({children:keyed.map(q=>cell([textParagraph(q.correctOption||'-',{bold:true,size:20,color:'15803D',align:AlignmentType.CENTER})],width))})]}));}
     const solved=questions.filter(q=>q.solution);if(solved.length){children.push(textParagraph('DETAILED SOLUTIONS / विस्तृत हल',{bold:true,size:22,color:'1E3A8A',align:AlignmentType.CENTER}));for(const q of solved){children.push(textParagraph(`Q.${q.number} Solution / हल:`,{bold:true,size:19,color:'2563EB'}));children.push(textParagraph(q.solution||'',{size:18}));}}
