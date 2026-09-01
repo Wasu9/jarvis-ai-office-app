@@ -18,23 +18,39 @@ export const FileDropzone: React.FC<FileDropzoneProps> = ({ attachedFiles, onAdd
     const newAttached: AttachedFile[] = [];
     for (const file of selected) {
       const id = `file-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-      let base64Data: string | undefined;
+      const base64Data = await readFileAsBase64(file);
       let textPreview: string | undefined;
-      if (file.type.includes('pdf') || file.type.startsWith('image/')) base64Data = await readFileAsBase64(file);
-      else if (file.type.includes('text') || /\.(txt|md)$/i.test(file.name)) textPreview = await readFileAsText(file);
-      else base64Data = await readFileAsBase64(file);
-      newAttached.push({ id, name: file.name, size: file.size, type: file.type || 'application/octet-stream', base64Data, textPreview, uploadedAt: new Date().toISOString() });
+      if (file.type.includes('text') || /\.(txt|md)$/i.test(file.name)) {
+        textPreview = await readFileAsText(file);
+      }
+      newAttached.push({
+        id,
+        name: file.name,
+        size: file.size,
+        type: file.type || 'application/octet-stream',
+        base64Data,
+        textPreview,
+        uploadedAt: new Date().toISOString(),
+      });
     }
     onAddFiles(newAttached);
     e.target.value = '';
   };
 
   const readFileAsBase64 = (file: File): Promise<string> => new Promise((resolve, reject) => {
-    const reader = new FileReader(); reader.onload = () => resolve(reader.result as string); reader.onerror = reject; reader.readAsDataURL(file);
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
   });
+
   const readFileAsText = (file: File): Promise<string> => new Promise((resolve, reject) => {
-    const reader = new FileReader(); reader.onload = () => resolve((reader.result as string).slice(0, 1000)); reader.onerror = reject; reader.readAsText(file);
+    const reader = new FileReader();
+    reader.onload = () => resolve((reader.result as string).slice(0, 1000));
+    reader.onerror = reject;
+    reader.readAsText(file);
   });
+
   const formatSize = (bytes: number) => bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   const getFileIcon = (name: string, type: string) => type.includes('pdf') || name.toLowerCase().endsWith('.pdf') ? <FileText className="h-4 w-4 text-rose-400" /> : type.startsWith('image/') ? <ImageIcon className="h-4 w-4 text-emerald-400" /> : <File className="h-4 w-4 text-cyan-400" />;
 
