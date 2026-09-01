@@ -1,7 +1,7 @@
 {
   "name": "jarvis-ai-office-app",
   "private": true,
-  "version": "2.5.1",
+  "version": "2.5.0",
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
