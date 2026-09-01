@@ -1,0 +1,1 @@
+Production rebuild trigger for the DOCX math, font, numeric-option and diagram rendering fixes.
