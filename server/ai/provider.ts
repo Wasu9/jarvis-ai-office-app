@@ -5,10 +5,7 @@ export interface AICompletionOptions {
   temperature?: number;
   responseMimeType?: string;
   responseSchema?: Record<string, any>;
-  inlineFiles?: Array<{
-    mimeType: string;
-    data: string;
-  }>;
+  inlineFiles?: Array<{ mimeType: string; data: string }>;
   model?: string;
 }
 
@@ -19,7 +16,7 @@ export interface AIProvider {
 }
 
 const DEFAULT_MODEL = 'gemini-3.7-flash';
-const FALLBACK_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-2.5-flash'];
+const FALLBACK_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite'];
 
 export class GeminiProvider implements AIProvider {
   name = 'Gemini 3.7 Flash';
@@ -35,16 +32,17 @@ export class GeminiProvider implements AIProvider {
     return new GoogleGenAI({ apiKey, httpOptions: { headers: { 'User-Agent': 'jarvis-ai-office' } } });
   }
 
-  isAvailable(): boolean {
-    return !!this.getApiKey();
-  }
+  isAvailable(): boolean { return !!this.getApiKey(); }
 
   private classifyError(err: any): 'quota' | 'unavailable' | 'invalid' | 'other' {
     const message = String(err?.message || err || '').toLowerCase();
     const status = String(err?.status || err?.code || '').toLowerCase();
-    if (status.includes('resource_exhausted') || message.includes('resource_exhausted') || message.includes('quota')) return 'quota';
-    if (status.includes('503') || message.includes('503') || message.includes('unavailable') || message.includes('high demand')) return 'unavailable';
-    if (status.includes('400') || message.includes('invalid argument') || message.includes('not found')) return 'invalid';
+    if (status.includes('resource_exhausted') || message.includes('resource_exhausted') || message.includes('quota') || message.includes('rate limit')) return 'quota';
+    if (status.includes('503') || message.includes('503') || message.includes('unavailable') || message.includes('high demand') || message.includes('temporarily')) return 'unavailable';
+    // A model that has been retired, shut down, or is unavailable to a project
+    // must not terminate the fallback chain. Google returns these as 404/NOT_FOUND.
+    if (status.includes('404') || status.includes('not_found') || message.includes('not found') || message.includes('no longer available') || message.includes('shut down') || message.includes('shutdown') || message.includes('retired')) return 'unavailable';
+    if (status.includes('400') || message.includes('invalid argument')) return 'invalid';
     return 'other';
   }
 
@@ -55,22 +53,17 @@ export class GeminiProvider implements AIProvider {
     const requestedModel = options?.model?.trim() || DEFAULT_MODEL;
     const models = [requestedModel, ...FALLBACK_MODELS].filter((m, i, arr) => arr.indexOf(m) === i);
     const contentsParts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [];
-    if (options?.inlineFiles?.length) {
-      for (const file of options.inlineFiles) contentsParts.push({ inlineData: { mimeType: file.mimeType, data: file.data } });
-    }
+    if (options?.inlineFiles?.length) for (const file of options.inlineFiles) contentsParts.push({ inlineData: { mimeType: file.mimeType, data: file.data } });
     contentsParts.push({ text: prompt });
 
     let lastError: any = null;
     for (const currentModel of models) {
       try {
-        // Gemini 3.x no longer accepts temperature/top_p/top_k. Keep the request
-        // compatible with the current stable 3.7/3.6/3.5 Flash API.
         const config: Record<string, any> = {
           systemInstruction: options?.systemInstruction,
           responseMimeType: options?.responseMimeType,
           responseSchema: options?.responseSchema,
         };
-        // Only legacy models such as 2.5 receive temperature.
         if (!currentModel.startsWith('gemini-3.')) config.temperature = options?.temperature ?? 0.35;
 
         const response = await client.models.generateContent({
@@ -78,7 +71,6 @@ export class GeminiProvider implements AIProvider {
           contents: contentsParts.length === 1 && contentsParts[0].text ? contentsParts[0].text : { parts: contentsParts },
           config,
         });
-
         const outputText = response.text?.trim() || '';
         if (!outputText) throw new Error(`Gemini returned an empty response from ${currentModel}.`);
         return outputText;
@@ -93,7 +85,7 @@ export class GeminiProvider implements AIProvider {
     console.error('[GeminiProvider Error]', lastError);
     const kind = this.classifyError(lastError);
     if (kind === 'quota') throw new Error('Gemini quota is currently exhausted for the configured project/model. Wait for the quota window to reset or enable billing/increase the Gemini API quota, then retry JARVIS.');
-    if (kind === 'unavailable') throw new Error('Gemini is temporarily unavailable. JARVIS tried the configured fallback models; please retry in a moment.');
+    if (kind === 'unavailable') throw new Error('Gemini models are temporarily unavailable for this request. JARVIS tried the configured production fallback models; please retry in a moment.');
     if (kind === 'invalid') throw new Error(`Gemini rejected the request. ${lastError?.message || ''}`.trim());
     throw new Error(`Gemini could not complete the request. ${lastError?.message || String(lastError)}`.trim());
   }
