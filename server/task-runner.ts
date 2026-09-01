@@ -14,7 +14,8 @@ function wantsKey(prompt:string){return /answer\s*key|उत्तर\s*कु�
 function wantsSolutions(prompt:string){return /solution|solutions|step[- ]by[- ]step|विस्तृत हल|हल सहित/i.test(prompt);}
 function extractJson(text:string):any{const cleaned=text.replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/i,'').trim();try{return JSON.parse(cleaned);}catch{}const a=cleaned.indexOf('{'),b=cleaned.lastIndexOf('}');if(a>=0&&b>a){try{return JSON.parse(cleaned.slice(a,b+1));}catch{}}throw new Error('JARVIS received invalid structured data and stopped before creating the Word file.');}
 function countRequested(prompt:string):number|null{const m=prompt.match(/\b(\d{1,3})\s*(?:questions?|qs?|प्रश्न)\b/i);return m?Number(m[1]):null;}
-function visualLikely(q:DocxPaperData['questions'][number]){const t=`${q.textEn||''} ${q.textHi||''}`.toLowerCase();return /(figure|fig\.|graph|plot|diagram|image|shown below|given below|चित्र|आरेख|ग्राफ|नीचे दिया|नीचे दिए)/i.test(t);}
+type PaperQuestion=NonNullable<DocxPaperData['questions']>[number];
+function visualLikely(q:PaperQuestion){const t=`${q.textEn||''} ${q.textHi||''}`.toLowerCase();return /(figure|fig\.|graph|plot|diagram|image|shown below|given below|चित्र|आरेख|ग्राफ|नीचे दिया|नीचे दिए)/i.test(t);}
 function normalizeOption(n:string){const s=String(n||'').trim().toUpperCase();return ({A:'1',B:'2',C:'3',D:'4'} as Record<string,string>)[s]||s;}
 function validate(data:DocxPaperData,prompt:string,sourceLocked:boolean){
   const qs=data.questions||[],expected=countRequested(prompt);if(!qs.length)throw new Error('No questions were produced.');
