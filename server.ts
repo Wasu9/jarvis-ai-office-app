@@ -9,7 +9,7 @@ import { TaskRunner } from './server/task-runner.js';
 import { aiRegistry } from './server/ai/provider.js';
 import { generateDocxBuffer } from './server/docx-generator.js';
 import { chatWithJarvis } from './server/chat.js';
-import { persistenceInfo, saveCustomAgents, saveMemories } from './server/persistence.js';
+import { persistenceInfo, saveCustomAgents, saveMemories, loadTasks, getTask, deleteTask, clearTasks } from './server/persistence.js';
 
 dotenv.config();
 
@@ -23,7 +23,7 @@ async function startServer() {
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-  app.get('/api/health', (_req, res) => res.json({ status: 'ok', service: 'JARVIS AI Office', timestamp: new Date().toISOString(), aiConfigured: !!process.env.GEMINI_API_KEY, persistence: persistenceInfo() }));
+  app.get('/api/health', (_req, res) => res.json({ status: 'ok', service: 'JARVIS AI Office', version: '2.5.0', timestamp: new Date().toISOString(), aiConfigured: !!process.env.GEMINI_API_KEY, persistence: persistenceInfo() }));
   app.get('/api/providers', (_req, res) => res.json({ providers: aiRegistry.listProviders(), current: 'gemini', isApiKeySet: !!process.env.GEMINI_API_KEY }));
   app.get('/api/agents', (_req, res) => res.json({ agents: agentRegistry.getAllAgents() }));
 
@@ -67,6 +67,20 @@ async function startServer() {
   });
   app.delete('/api/memory/:id', (req, res) => { try { const success = memoryStore.delete(req.params.id); saveMemories(memoryStore.getAll()); res.json({ success }); } catch (err: any) { res.status(500).json({ error: err.message }); } });
   app.post('/api/memory/clear', (_req, res) => { try { memoryStore.clear(); saveMemories([]); res.json({ success: true }); } catch (err: any) { res.status(500).json({ error: err.message }); } });
+
+  app.get('/api/tasks', (req, res) => {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 100);
+    const status = typeof req.query.status === 'string' ? req.query.status : '';
+    const tasks = loadTasks().filter((task) => !status || task.status === status).slice(0, limit);
+    res.json({ tasks, count: tasks.length, limit });
+  });
+  app.get('/api/tasks/:id', (req, res) => {
+    const task = getTask(req.params.id);
+    if (!task) return res.status(404).json({ error: 'Task not found' });
+    res.json({ task });
+  });
+  app.delete('/api/tasks/:id', (req, res) => res.json({ success: deleteTask(req.params.id) }));
+  app.post('/api/tasks/clear', (_req, res) => { clearTasks(); res.json({ success: true }); });
 
   app.post('/api/chat', async (req, res) => {
     try {
