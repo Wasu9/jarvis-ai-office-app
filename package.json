@@ -1,7 +1,7 @@
 {
   "name": "jarvis-ai-office-app",
   "private": true,
-  "version": "2.5.0",
+  "version": "2.5.1",
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
@@ -24,6 +24,7 @@
     "phaser": "^3.90.0",
     "react": "^19.0.1",
     "react-dom": "^19.0.0",
+    "sharp": "0.34.5",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.3",
