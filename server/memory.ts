@@ -50,7 +50,7 @@ class MemoryStore {
     for (const item of saved) {
       const id = item.id || `mem-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       this.memories.set(id, {
-        category: item.category,
+        category: item.category as JarvisMemoryItem['category'],
         key: item.key,
         value: item.value,
         id,
