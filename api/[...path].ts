@@ -96,6 +96,24 @@ app.post('/api/tasks/route-check', (req, res) => {
   catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
+app.post('/api/tasks/execute-stream', async (req, res) => {
+  res.status(200);
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  try {
+    res.flushHeaders?.();
+    const task = await TaskRunner.execute({ ...req.body, onStep: (step) => {
+      res.write(`data: ${JSON.stringify({ type: 'step', step })}\n\n`);
+    }});
+    res.write(`data: ${JSON.stringify({ type: 'task', task })}\n\n`);
+  } catch (err: any) {
+    res.write(`data: ${JSON.stringify({ type: 'error', error: err?.message || 'Task execution failed' })}\n\n`);
+  } finally {
+    res.end();
+  }
+});
+
 app.post('/api/tasks/execute', async (req, res) => {
   try {
     const { userPrompt, selectedAgentId, attachedFiles, model, settings } = req.body;
