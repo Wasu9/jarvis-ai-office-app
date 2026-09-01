@@ -1,217 +1,41 @@
 import React from 'react';
-import {
-  Cpu,
-  Bot,
-  FolderKanban,
-  BrainCircuit,
-  History,
-  Settings,
-  Sparkles,
-  Zap,
-} from 'lucide-react';
+import { Activity, Bot, BrainCircuit, Cpu, FolderKanban, History, Settings, Sparkles, Zap } from 'lucide-react';
 import { JarvisSettings } from '../types';
 
 interface HeaderProps {
-  activeTab: 'assistant' | 'agents' | 'files' | 'memory' | 'history';
-  setActiveTab: (tab: 'assistant' | 'agents' | 'files' | 'memory' | 'history') => void;
-  onOpenSettings: () => void;
-  onOpenQuickBuilder: () => void;
-  isAiConfigured: boolean;
-  settings: JarvisSettings;
-  taskCount: number;
+  activeTab: 'assistant'|'agents'|'files'|'memory'|'history';
+  setActiveTab: (tab:'assistant'|'agents'|'files'|'memory'|'history')=>void;
+  onOpenSettings:()=>void; onOpenQuickBuilder:()=>void;
+  isAiConfigured:boolean; settings:JarvisSettings; taskCount:number;
 }
 
-export const Header: React.FC<HeaderProps> = ({
-  activeTab,
-  setActiveTab,
-  onOpenSettings,
-  onOpenQuickBuilder,
-  isAiConfigured,
-  settings,
-  taskCount,
-}) => {
-  return (
-    <header className="sticky top-0 z-40 w-full border-b border-white/10 bg-[#05060f]/60 backdrop-blur-xl">
-      <div className="mx-auto flex max-w-7xl items-center justify-between px-3 py-3 sm:px-6">
-        {/* Left: Brand Identity with Glowing Cyan Glass Emblem */}
-        <div className="flex items-center space-x-3">
-          <div
-            onClick={() => setActiveTab('assistant')}
-            className="group flex cursor-pointer items-center space-x-3"
-            id="jarvis-brand-logo"
-          >
-            <div className="w-10 h-10 bg-cyan-500 rounded-xl flex items-center justify-center shadow-[0_0_20px_rgba(6,182,212,0.5)] transition-transform group-hover:scale-105">
-              <Cpu className="h-5 w-5 text-white" />
-            </div>
-            <div>
-              <div className="flex items-center space-x-2">
-                <h1 className="font-['Space_Grotesk'] text-lg font-bold tracking-tight text-white uppercase sm:text-xl">
-                  JARVIS <span className="text-cyan-400">AI OFFICE</span>
-                </h1>
-                <div className="bg-white/5 border border-white/10 px-2 py-0.5 rounded-full flex items-center gap-1.5">
-                  <div className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse"></div>
-                  <span className="text-[10px] font-medium text-slate-300">PRO</span>
-                </div>
-              </div>
-              <p className="hidden text-[10px] text-slate-400 tracking-wider uppercase sm:block">
-                {settings.instituteName || 'Professional Institute Workspace'}
-              </p>
-            </div>
-          </div>
+const nav = [
+  ['assistant','Command',Bot], ['agents','Agents',Sparkles], ['files','Workspace',FolderKanban],
+  ['memory','Memory',BrainCircuit], ['history','Activity',History],
+] as const;
+
+export const Header:React.FC<HeaderProps> = ({activeTab,setActiveTab,onOpenSettings,onOpenQuickBuilder,isAiConfigured,settings,taskCount}) => (
+  <header className="sticky top-0 z-50 border-b border-white/[.06] bg-[#070912]/80 backdrop-blur-2xl">
+    <div className="mx-auto flex max-w-[1700px] items-center gap-4 px-4 py-3 lg:px-6">
+      <button onClick={()=>setActiveTab('assistant')} className="group flex min-w-0 items-center gap-3 text-left">
+        <div className="relative grid h-11 w-11 shrink-0 place-items-center rounded-2xl border border-violet-300/20 bg-gradient-to-br from-violet-500/25 to-cyan-400/10 shadow-[0_0_35px_rgba(124,92,255,.18)]">
+          <Cpu className="h-5 w-5 text-violet-200 transition-transform group-hover:rotate-12"/>
+          <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,.8)]"/>
         </div>
-
-        {/* Center: Main Navigation Tabs (Frosted Glass Container) */}
-        <nav className="hidden items-center rounded-2xl border border-white/10 bg-white/5 p-1 backdrop-blur-md md:flex" id="header-nav-tabs">
-          <button
-            id="nav-tab-assistant"
-            onClick={() => setActiveTab('assistant')}
-            className={`flex items-center space-x-2 rounded-xl px-3.5 py-1.5 text-xs font-medium transition-all ${
-              activeTab === 'assistant'
-                ? 'bg-cyan-500/20 border border-cyan-500/40 text-cyan-300 shadow-[0_0_15px_rgba(6,182,212,0.3)]'
-                : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
-            }`}
-          >
-            <Bot className="h-3.5 w-3.5" />
-            <span>Assistant</span>
-          </button>
-
-          <button
-            id="nav-tab-agents"
-            onClick={() => setActiveTab('agents')}
-            className={`flex items-center space-x-2 rounded-xl px-3.5 py-1.5 text-xs font-medium transition-all ${
-              activeTab === 'agents'
-                ? 'bg-cyan-500/20 border border-cyan-500/40 text-cyan-300 shadow-[0_0_15px_rgba(6,182,212,0.3)]'
-                : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
-            }`}
-          >
-            <Sparkles className="h-3.5 w-3.5" />
-            <span>Agents</span>
-          </button>
-
-          <button
-            id="nav-tab-files"
-            onClick={() => setActiveTab('files')}
-            className={`flex items-center space-x-2 rounded-xl px-3.5 py-1.5 text-xs font-medium transition-all ${
-              activeTab === 'files'
-                ? 'bg-cyan-500/20 border border-cyan-500/40 text-cyan-300 shadow-[0_0_15px_rgba(6,182,212,0.3)]'
-                : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
-            }`}
-          >
-            <FolderKanban className="h-3.5 w-3.5" />
-            <span>Files</span>
-          </button>
-
-          <button
-            id="nav-tab-memory"
-            onClick={() => setActiveTab('memory')}
-            className={`flex items-center space-x-2 rounded-xl px-3.5 py-1.5 text-xs font-medium transition-all ${
-              activeTab === 'memory'
-                ? 'bg-cyan-500/20 border border-cyan-500/40 text-cyan-300 shadow-[0_0_15px_rgba(6,182,212,0.3)]'
-                : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
-            }`}
-          >
-            <BrainCircuit className="h-3.5 w-3.5" />
-            <span>Memory</span>
-          </button>
-
-          <button
-            id="nav-tab-history"
-            onClick={() => setActiveTab('history')}
-            className={`flex items-center space-x-2 rounded-xl px-3.5 py-1.5 text-xs font-medium transition-all ${
-              activeTab === 'history'
-                ? 'bg-cyan-500/20 border border-cyan-500/40 text-cyan-300 shadow-[0_0_15px_rgba(6,182,212,0.3)]'
-                : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
-            }`}
-          >
-            <History className="h-3.5 w-3.5" />
-            <span>History</span>
-            {taskCount > 0 && (
-              <span className="rounded-full bg-white/10 px-1.5 py-0.2 text-[10px] text-cyan-300">
-                {taskCount}
-              </span>
-            )}
-          </button>
-        </nav>
-
-        {/* Right: Model status badge & Quick Action & Settings */}
-        <div className="flex items-center space-x-2.5">
-          {/* Active Model Pill Badge */}
-          <div className="hidden lg:flex bg-white/5 border border-white/10 px-3 py-1.5 rounded-full items-center gap-2">
-            <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></div>
-            <span className="text-xs font-medium text-slate-300">{settings.aiModel}</span>
-          </div>
-
-          <button
-            id="btn-quick-paper-builder"
-            onClick={onOpenQuickBuilder}
-            className="flex items-center space-x-1.5 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 text-xs font-medium text-cyan-300 transition-all hover:border-cyan-400 hover:bg-cyan-500/20 hover:text-white shadow-[0_0_15px_rgba(6,182,212,0.2)]"
-          >
-            <Zap className="h-3.5 w-3.5 text-cyan-400" />
-            <span className="hidden sm:inline">Quick Paper/DPP</span>
-            <span className="sm:hidden">Create</span>
-          </button>
-
-          <button
-            id="btn-open-settings"
-            onClick={onOpenSettings}
-            className="rounded-xl border border-white/10 bg-white/5 p-2 text-slate-400 transition-colors hover:border-white/20 hover:bg-white/10 hover:text-white"
-            title="Settings"
-          >
-            <Settings className="h-4 w-4" />
-          </button>
+        <div className="hidden min-w-0 sm:block">
+          <div className="flex items-center gap-2"><span className="text-base font-black tracking-[.16em] text-white">JARVIS</span><span className="rounded-full border border-violet-300/20 bg-violet-400/10 px-2 py-0.5 text-[8px] font-bold tracking-widest text-violet-200">AI OS</span></div>
+          <div className="truncate text-[9px] uppercase tracking-[.14em] text-slate-500">{settings.instituteName || 'Intelligent Office'}</div>
         </div>
+      </button>
+      <nav className="hidden flex-1 justify-center md:flex"><div className="flex items-center gap-1 rounded-2xl border border-white/[.07] bg-white/[.025] p-1.5 shadow-inner">
+        {nav.map(([id,label,Icon])=><button key={id} onClick={()=>setActiveTab(id)} className={`relative flex items-center gap-2 rounded-xl px-4 py-2 text-[11px] font-semibold transition-all ${activeTab===id?'bg-white/[.09] text-white shadow-[0_6px_25px_rgba(0,0,0,.18)]':'text-slate-500 hover:bg-white/[.04] hover:text-slate-200'}`}><Icon className={`h-3.5 w-3.5 ${activeTab===id?'text-violet-300':'text-slate-600'}`}/>{label}{id==='history'&&taskCount>0&&<span className="rounded-full bg-violet-400/15 px-1.5 text-[8px] text-violet-200">{taskCount}</span>}{activeTab===id&&<span className="absolute inset-x-4 -bottom-1 h-px bg-gradient-to-r from-transparent via-violet-300 to-transparent"/>}</button>)}
+      </div></nav>
+      <div className="ml-auto flex items-center gap-2">
+        <div className="hidden items-center gap-2 rounded-xl border border-white/[.07] bg-white/[.025] px-3 py-2 lg:flex"><Activity className="h-3.5 w-3.5 text-emerald-300"/><span className="text-[9px] font-bold tracking-wider text-slate-400">{isAiConfigured?'CORE READY':'CONFIG REQUIRED'}</span></div>
+        <button onClick={onOpenQuickBuilder} className="flex items-center gap-2 rounded-xl border border-violet-300/20 bg-violet-400/10 px-3 py-2 text-[10px] font-bold text-violet-200 transition hover:bg-violet-400/20"><Zap className="h-3.5 w-3.5"/><span className="hidden sm:inline">CREATE</span></button>
+        <button onClick={onOpenSettings} className="grid h-9 w-9 place-items-center rounded-xl border border-white/[.07] bg-white/[.025] text-slate-400 transition hover:border-white/15 hover:text-white" title="Settings"><Settings className="h-4 w-4"/></button>
       </div>
-
-      {/* Mobile Bottom Sub-navigation bar */}
-      <div className="flex border-t border-white/10 bg-[#05060f]/80 backdrop-blur-xl px-2 py-1.5 md:hidden">
-        <div className="grid w-full grid-cols-5 gap-1">
-          <button
-            onClick={() => setActiveTab('assistant')}
-            className={`flex flex-col items-center justify-center rounded-xl py-1.5 text-[10px] font-medium ${
-              activeTab === 'assistant' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30' : 'text-slate-400'
-            }`}
-          >
-            <Bot className="h-4 w-4" />
-            <span>JARVIS</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('agents')}
-            className={`flex flex-col items-center justify-center rounded-xl py-1.5 text-[10px] font-medium ${
-              activeTab === 'agents' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30' : 'text-slate-400'
-            }`}
-          >
-            <Sparkles className="h-4 w-4" />
-            <span>Agents</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('files')}
-            className={`flex flex-col items-center justify-center rounded-xl py-1.5 text-[10px] font-medium ${
-              activeTab === 'files' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30' : 'text-slate-400'
-            }`}
-          >
-            <FolderKanban className="h-4 w-4" />
-            <span>Files</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('memory')}
-            className={`flex flex-col items-center justify-center rounded-xl py-1.5 text-[10px] font-medium ${
-              activeTab === 'memory' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30' : 'text-slate-400'
-            }`}
-          >
-            <BrainCircuit className="h-4 w-4" />
-            <span>Memory</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('history')}
-            className={`flex flex-col items-center justify-center rounded-xl py-1.5 text-[10px] font-medium ${
-              activeTab === 'history' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30' : 'text-slate-400'
-            }`}
-          >
-            <History className="h-4 w-4" />
-            <span>History</span>
-          </button>
-        </div>
-      </div>
-    </header>
-  );
-};
+    </div>
+    <div className="border-t border-white/[.04] px-2 py-1.5 md:hidden"><div className="grid grid-cols-5 gap-1">{nav.map(([id,label,Icon])=><button key={id} onClick={()=>setActiveTab(id)} className={`flex flex-col items-center gap-0.5 rounded-xl py-1.5 text-[9px] ${activeTab===id?'bg-violet-400/10 text-violet-200':'text-slate-500'}`}><Icon className="h-4 w-4"/>{label}</button>)}</div></div>
+  </header>
+);
