@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { TaskRecord } from '../src/types/index.js';
 
 export interface PersistedAgent {
   id?: string;
@@ -27,11 +28,10 @@ export interface PersistedMemory {
 const DATA_DIR = process.env.JARVIS_DATA_DIR?.trim() || path.join(process.cwd(), '.jarvis-data');
 const AGENTS_FILE = path.join(DATA_DIR, 'custom-agents.json');
 const MEMORY_FILE = path.join(DATA_DIR, 'memory.json');
+const TASKS_FILE = path.join(DATA_DIR, 'tasks.json');
+const MAX_PERSISTED_TASKS = 100;
 
 function canPersist(): boolean {
-  // Vercel/serverless filesystems are ephemeral. Persistence is intended for
-  // the local zero-cost deployment and silently degrades to process memory in
-  // read-only/serverless environments.
   return process.env.JARVIS_DISABLE_FILE_PERSISTENCE !== 'true';
 }
 
@@ -80,6 +80,48 @@ export function saveMemories(memories: PersistedMemory[]): void {
   writeJson(MEMORY_FILE, memories);
 }
 
+function compactTask(task: TaskRecord): TaskRecord {
+  return {
+    ...task,
+    attachedFiles: task.attachedFiles.map(({ base64Data: _base64Data, ...file }) => file),
+    result: task.result ? {
+      ...task.result,
+      rawText: task.result.rawText.slice(0, 20000),
+      artifacts: task.result.artifacts.map(({ docxBase64: _docxBase64, content, ...artifact }) => ({
+        ...artifact,
+        content: content?.slice(0, 20000),
+      })),
+    } : undefined,
+  };
+}
+
+export function loadTasks(): TaskRecord[] {
+  const tasks = readJson<unknown>(TASKS_FILE, []);
+  return Array.isArray(tasks) ? tasks.filter((t): t is TaskRecord => !!t && typeof t === 'object' && typeof (t as any).id === 'string' && typeof (t as any).title === 'string') : [];
+}
+
+export function saveTask(task: TaskRecord): void {
+  const tasks = loadTasks().filter((t) => t.id !== task.id);
+  tasks.unshift(compactTask(task));
+  writeJson(TASKS_FILE, tasks.slice(0, MAX_PERSISTED_TASKS));
+}
+
+export function getTask(id: string): TaskRecord | undefined {
+  return loadTasks().find((task) => task.id === id);
+}
+
+export function deleteTask(id: string): boolean {
+  const tasks = loadTasks();
+  const next = tasks.filter((task) => task.id !== id);
+  if (next.length === tasks.length) return false;
+  writeJson(TASKS_FILE, next);
+  return true;
+}
+
+export function clearTasks(): void {
+  writeJson(TASKS_FILE, []);
+}
+
 export function persistenceInfo() {
-  return { enabled: canPersist(), dataDir: DATA_DIR };
+  return { enabled: canPersist(), dataDir: DATA_DIR, taskHistoryLimit: MAX_PERSISTED_TASKS };
 }
