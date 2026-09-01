@@ -1,9 +1,25 @@
 import { Document, Packer, Paragraph, TextRun, AlignmentType, Table, TableRow, TableCell, BorderStyle, WidthType, ShadingType, ImageRun } from 'docx';
 
 export interface DocxPaperData {
-  title: string; instituteName?: string; subject?: string; examType?: string; duration?: string; totalMarks?: string | number;
+  title: string;
+  instituteName?: string;
+  subject?: string;
+  examType?: string;
+  duration?: string;
+  totalMarks?: string | number;
   instructions?: string[];
-  questions?: Array<{ number: number|string; textEn: string; textHi?: string; optionsEn?: string[]; optionsHi?: string[]; correctOption?: string; marks?: number|string; solution?: string; diagramSvg?: string }>;
+  sourceFaithful?: boolean;
+  questions?: Array<{
+    number: number|string;
+    textEn: string;
+    textHi?: string;
+    optionsEn?: string[];
+    optionsHi?: string[];
+    correctOption?: string;
+    marks?: number|string;
+    solution?: string;
+    diagramSvg?: string;
+  }>;
   rawContent?: string;
 }
 
@@ -45,29 +61,75 @@ function questionTable(q:NonNullable<DocxPaperData['questions']>[number]):Table{
   const en=q.optionsEn||[],hi=q.optionsHi||[];
   for(let i=0;i<4;i++){
     const letter=String.fromCharCode(65+i);
-    // Always render both language columns. Never hide a Hindi option because it resembles English.
     english.push(textParagraph(`(${letter}) ${en[i]||''}`,{size:19}));
     hindi.push(textParagraph(`(${letter}) ${hi[i]||''}`,{size:19,hindi:true}));
   }
-  const rows:TableRow[]=[new TableRow({children:[cell([textParagraph('ENGLISH',{bold:true,size:17,color:'FFFFFF',align:AlignmentType.CENTER})],50,'1E3A8A'),cell([textParagraph('हिन्दी',{bold:true,size:17,color:'FFFFFF',hindi:true,align:AlignmentType.CENTER})],50,'1E3A8A')]}),new TableRow({children:[cell(english,50,'F8FAFC'),cell(hindi,50,'F8FAFC')]})];
+  const rows:TableRow[]=[new TableRow({children:[cell(english,50,'F8FAFC'),cell(hindi,50,'F8FAFC')]})];
   if(q.diagramSvg && !/^\s*(svg)?\s*$/i.test(q.diagramSvg)){
-    try{const image=new ImageRun({type:'svg',data:Buffer.from(q.diagramSvg,'utf8'),fallback:{type:'png',data:SVG_FALLBACK_PNG},transformation:{width:420,height:230}});rows.push(new TableRow({children:[new TableCell({columnSpan:2,children:[new Paragraph({alignment:AlignmentType.CENTER,children:[image]})]})]}));}catch{}
+    try{
+      const image=new ImageRun({type:'svg',data:Buffer.from(q.diagramSvg,'utf8'),fallback:{type:'png',data:SVG_FALLBACK_PNG},transformation:{width:420,height:230}});
+      rows.push(new TableRow({children:[new TableCell({columnSpan:2,children:[new Paragraph({alignment:AlignmentType.CENTER,children:[image]})]})]}));
+    }catch{}
   }
   return new Table({width:{size:100,type:WidthType.PERCENTAGE},rows,borders:{top:{style:BorderStyle.SINGLE,size:4,color:'CBD5E1'},bottom:{style:BorderStyle.SINGLE,size:4,color:'CBD5E1'},left:{style:BorderStyle.SINGLE,size:4,color:'CBD5E1'},right:{style:BorderStyle.SINGLE,size:4,color:'CBD5E1'},insideHorizontal:{style:BorderStyle.SINGLE,size:2,color:'E2E8F0'},insideVertical:{style:BorderStyle.SINGLE,size:4,color:'CBD5E1'}}});
 }
 
+function metadataTable(data:DocxPaperData):Table|null{
+  const left:Paragraph[]=[]; const right:Paragraph[]=[];
+  if(data.examType) left.push(textParagraph(`Target Exam: ${data.examType}`,{bold:true,size:18}));
+  if(data.subject) left.push(textParagraph(`Subject: ${data.subject}`,{size:18}));
+  if(data.duration) right.push(textParagraph(`Time Allowed: ${data.duration}`,{bold:true,size:18}));
+  if(data.totalMarks!==undefined && data.totalMarks!==null && String(data.totalMarks).trim()) right.push(textParagraph(`Maximum Marks: ${String(data.totalMarks)}`,{size:18}));
+  if(!left.length&&!right.length)return null;
+  return new Table({width:{size:100,type:WidthType.PERCENTAGE},rows:[new TableRow({children:[cell(left,50,'F1F5F9'),cell(right,50,'F1F5F9')]})]});
+}
+
 export async function generateDocxBuffer(data:DocxPaperData):Promise<Buffer>{
-  const children:(Paragraph|Table)[]=[];const instituteName=data.instituteName||'JARVIS ACADEMY';const title=data.title||'NEET / JEE Practice Assessment';const questions=data.questions||[];
-  children.push(textParagraph(instituteName.toUpperCase(),{bold:true,size:32,color:'1E3A8A',align:AlignmentType.CENTER}));children.push(textParagraph(title,{bold:true,size:26,color:'0F172A',align:AlignmentType.CENTER}));
+  const children:(Paragraph|Table)[]=[];
+  const sourceFaithful=Boolean(data.sourceFaithful);
+  const questions=data.questions||[];
+
+  // In source-faithful mode never invent fallback institute/title text.
+  if(data.instituteName)children.push(textParagraph(data.instituteName.toUpperCase(),{bold:true,size:32,color:'1E3A8A',align:AlignmentType.CENTER}));
+  if(data.title)children.push(textParagraph(data.title,{bold:true,size:26,color:'0F172A',align:AlignmentType.CENTER}));
+
   if(questions.length){
-    children.push(new Table({width:{size:100,type:WidthType.PERCENTAGE},rows:[new TableRow({children:[cell([textParagraph(`Target Exam: ${data.examType||'NEET / JEE'}`,{bold:true,size:18}),textParagraph(`Subject: ${data.subject||'All Subjects'}`,{size:18})],50,'F1F5F9'),cell([textParagraph(`Time Allowed: ${data.duration||'60 Mins'}`,{bold:true,size:18}),textParagraph(`Maximum Marks: ${String(data.totalMarks||questions.length*4)}`,{size:18})],50,'F1F5F9')]})]}));
-    children.push(textParagraph('GENERAL INSTRUCTIONS / सामान्य निर्देश:',{bold:true,size:20,color:'334155'}));
-    const instructions=data.instructions?.length?data.instructions:['1. All questions are compulsory. Each correct answer carries +4 marks.','2. For each incorrect answer, 1 mark will be deducted (-1 negative marking).','3. Read both English and Hindi versions carefully before answering.'];
-    for(const instruction of instructions)children.push(textParagraph(instruction,{size:18,color:'475569'}));
-    // Question number is a compact inline heading, not a repeated ENGLISH/HINDI header.
-    for(const q of questions){children.push(textParagraph(`Q.${q.number}`,{bold:true,size:22,color:'1E293B'}));children.push(questionTable(q));children.push(new Paragraph({spacing:{after:120},children:[]}));}
-    const keyed=questions.filter(q=>q.correctOption);if(keyed.length){children.push(textParagraph('ANSWER KEY / उत्तर कुंजी',{bold:true,size:24,color:'1E3A8A',align:AlignmentType.CENTER}));const width=100/Math.min(10,keyed.length);children.push(new Table({width:{size:100,type:WidthType.PERCENTAGE},rows:[new TableRow({children:keyed.map(q=>cell([textParagraph(`Q.${q.number}`,{bold:true,size:17,align:AlignmentType.CENTER})],width,'E2E8F0'))}),new TableRow({children:keyed.map(q=>cell([textParagraph(q.correctOption||'-',{bold:true,size:20,color:'15803D',align:AlignmentType.CENTER})],width))})]}));}
-    const solved=questions.filter(q=>q.solution);if(solved.length){children.push(textParagraph('DETAILED SOLUTIONS / विस्तृत हल',{bold:true,size:22,color:'1E3A8A',align:AlignmentType.CENTER}));for(const q of solved){children.push(textParagraph(`Q.${q.number} Solution / हल:`,{bold:true,size:19,color:'2563EB'}));children.push(textParagraph(q.solution||'',{size:18}));}}
-  }else if(data.rawContent){for(const line of data.rawContent.split(/\r?\n/))if(line.trim())children.push(textParagraph(line,{size:20}));}
-  const doc=new Document({creator:'JARVIS AI Office',title,sections:[{properties:{page:{margin:{top:720,bottom:720,left:720,right:720}}},children}]});return await Packer.toBuffer(doc);
+    const meta=metadataTable(data); if(meta)children.push(meta);
+    if(data.instructions?.length){
+      children.push(textParagraph('GENERAL INSTRUCTIONS / सामान्य निर्देश:',{bold:true,size:20,color:'334155'}));
+      for(const instruction of data.instructions)children.push(textParagraph(instruction,{size:18,color:'475569'}));
+    }
+
+    // One bilingual column header for the complete paper, never once per question.
+    children.push(new Table({width:{size:100,type:WidthType.PERCENTAGE},rows:[new TableRow({children:[cell([textParagraph('ENGLISH',{bold:true,size:17,color:'FFFFFF',align:AlignmentType.CENTER})],50,'1E3A8A'),cell([textParagraph('हिन्दी',{bold:true,size:17,color:'FFFFFF',hindi:true,align:AlignmentType.CENTER})],50,'1E3A8A')]})]}));
+
+    for(const q of questions){
+      children.push(textParagraph(`Q.${q.number}`,{bold:true,size:22,color:'1E293B'}));
+      children.push(questionTable(q));
+      children.push(new Paragraph({spacing:{after:120},children:[]}));
+    }
+
+    // Source-faithful bilingual conversion must not invent answer keys or solutions.
+    if(!sourceFaithful){
+      const keyed=questions.filter(q=>q.correctOption);
+      if(keyed.length){
+        children.push(textParagraph('ANSWER KEY / उत्तर कुंजी',{bold:true,size:24,color:'1E3A8A',align:AlignmentType.CENTER}));
+        const width=100/Math.min(10,keyed.length);
+        children.push(new Table({width:{size:100,type:WidthType.PERCENTAGE},rows:[
+          new TableRow({children:keyed.map(q=>cell([textParagraph(`Q.${q.number}`,{bold:true,size:17,align:AlignmentType.CENTER})],width,'E2E8F0'))}),
+          new TableRow({children:keyed.map(q=>cell([textParagraph(q.correctOption||'-',{bold:true,size:20,color:'15803D',align:AlignmentType.CENTER})],width))})
+        ]}));
+      }
+      const solved=questions.filter(q=>q.solution);
+      if(solved.length){
+        children.push(textParagraph('DETAILED SOLUTIONS / विस्तृत हल',{bold:true,size:22,color:'1E3A8A',align:AlignmentType.CENTER}));
+        for(const q of solved){children.push(textParagraph(`Q.${q.number} Solution / हल:`,{bold:true,size:19,color:'2563EB'}));children.push(textParagraph(q.solution||'',{size:18}));}
+      }
+    }
+  }else if(data.rawContent){
+    for(const line of data.rawContent.split(/\r?\n/))if(line.trim())children.push(textParagraph(line,{size:20}));
+  }
+
+  const doc=new Document({creator:'JARVIS AI Office',title:data.title||'Bilingual Document',sections:[{properties:{page:{margin:{top:720,bottom:720,left:720,right:720}}},children}]});
+  return await Packer.toBuffer(doc);
 }
