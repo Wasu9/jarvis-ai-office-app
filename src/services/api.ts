@@ -12,6 +12,8 @@ function requestedQuestionCount(prompt:string):number|null{const m=prompt.match(
 function promptWithQuestionCount(prompt:string,count:number){const re=/\b\d{1,3}\s*(?:questions?|qs?|प्रश्न)\b/i;return re.test(prompt)?prompt.replace(re,`${count} questions`):`${prompt} Process exactly ${count} questions from the attached source.`;}
 function rawQuestionsFromTask(task:TaskRecord):any[]{try{const parsed=JSON.parse(String(task.result?.rawText||''));return Array.isArray(parsed.questions)?parsed.questions:[];}catch{return[];}}
 function dispatchLiveStep(step:TaskStep){if(typeof window!=='undefined')window.dispatchEvent(new CustomEvent<TaskStep>('jarvis-task-step',{detail:step}));}
+function sleep(ms:number){return new Promise(resolve=>setTimeout(resolve,ms));}
+async function askRecoveryBrain(objective:string,progress:string,error:string):Promise<{decision:'retry'|'resume'|'pause';reason:string}>{try{const res=await fetch('/api/brain/recover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({objective,progress,error})});const data=await res.json().catch(()=>({}));if(data?.decision==='pause')return{decision:'pause',reason:String(data.reason||'Recovery brain requested a pause.')};if(data?.decision==='resume')return{decision:'resume',reason:String(data.reason||'Resume from the latest checkpoint.')};return{decision:'retry',reason:String(data.reason||'Transient failure; retrying the current checkpoint.')};}catch{return{decision:'retry',reason:'Recovery brain was unavailable; retrying the current checkpoint.'};}}
 
 export class ApiService{
   static async checkHealth(){return await (await fetch('/api/health')).json();}
@@ -40,15 +42,28 @@ export class ApiService{
     dispatchLiveStep({status:'generating',label:`SOURCE PLAN · ${total} questions · chunked execution`,timestamp:new Date().toISOString(),details:`Each source range runs in its own request so no single Vercel function can time out the full mission.`});
     for(let start=startFrom;start<=total;start+=chunkSize){
       const end=Math.min(start+chunkSize-1,total);const chunkPrompt=promptWithQuestionCount(params.userPrompt,end);dispatchLiveStep({status:'generating',label:`SOURCE CHUNK · Q.${start}–Q.${end}`,timestamp:new Date().toISOString(),details:`Overall mission: ${completed}/${total} captured. Processing this range independently.`});
-      try{
-        const task=await this.executeTaskStream({...params,userPrompt:chunkPrompt,resumeFrom:start>1?start:undefined,resumeQuestions:start>1?resumeQuestions:undefined},step=>{allSteps.push(step);dispatchLiveStep(step);});
-        lastTask=task;resumeQuestions=rawQuestionsFromTask(task);completed=resumeQuestions.length;
-        dispatchLiveStep({status:'checking',label:`SOURCE CHECKPOINT · ${completed}/${total}`,timestamp:new Date().toISOString(),details:`Checkpoint confirmed. Next range starts at Q.${completed+1}.`});
-      }catch(e:any){
-        const message=e?.message||'Source chunk execution failed.';const checkpoint={completedQuestions:completed,totalQuestions:total,nextQuestion:Math.min(total,completed+1),questions:resumeQuestions};
-        const base=lastTask||({id:`task-${started}`,title:params.userPrompt.slice(0,70),userPrompt:params.userPrompt,agentId:'pdf-bilingual',agentName:'PDF Bilingual Specialist',status:'failed',createdAt:new Date(started).toISOString(),steps:allSteps,attachedFiles:params.attachedFiles||[],error:message} as TaskRecord);
-        return {...base,status:'failed',createdAt:new Date(started).toISOString(),completedAt:new Date().toISOString(),steps:allSteps,attachedFiles:params.attachedFiles||[],error:`Source extraction paused after Q.${completed}. ${message}`,checkpoint};
+      let chunkTask:TaskRecord|null=null;let lastError='';
+      for(let recoveryAttempt=1;recoveryAttempt<=3&&!chunkTask;recoveryAttempt++){
+        try{
+          chunkTask=await this.executeTaskStream({...params,userPrompt:chunkPrompt,resumeFrom:start>1?start:undefined,resumeQuestions:start>1?resumeQuestions:undefined},step=>{allSteps.push(step);dispatchLiveStep(step);});
+        }catch(e:any){
+          lastError=e?.message||'Source chunk execution failed.';
+          if(recoveryAttempt>=3)break;
+          dispatchLiveStep({status:'checking',label:`AUTO-RECOVERY · attempt ${recoveryAttempt}/2`,timestamp:new Date().toISOString(),details:`JARVIS brain is deciding whether to retry or pause. Current checkpoint: ${completed}/${total}.`});
+          const brain=await askRecoveryBrain(`Complete source-faithful bilingual Word conversion of ${total} questions.`,`${completed}/${total} questions completed; next range Q.${start}–Q.${end}.`,lastError);
+          dispatchLiveStep({status:'checking',label:`BRAIN DECISION · ${brain.decision.toUpperCase()}`,timestamp:new Date().toISOString(),details:brain.reason});
+          if(brain.decision==='pause')break;
+          await sleep(recoveryAttempt===1?1500:3500);
+          dispatchLiveStep({status:'generating',label:`AUTO-RESUME · Q.${start}–Q.${end}`,timestamp:new Date().toISOString(),details:`No manual action required. Retrying from the latest confirmed checkpoint.`});
+        }
       }
+      if(!chunkTask){
+        const checkpoint={completedQuestions:completed,totalQuestions:total,nextQuestion:Math.min(total,completed+1),questions:resumeQuestions};
+        const base=lastTask||({id:`task-${started}`,title:params.userPrompt.slice(0,70),userPrompt:params.userPrompt,agentId:'pdf-bilingual',agentName:'PDF Bilingual Specialist',status:'failed',createdAt:new Date(started).toISOString(),steps:allSteps,attachedFiles:params.attachedFiles||[],error:lastError} as TaskRecord);
+        return {...base,status:'failed',createdAt:new Date(started).toISOString(),completedAt:new Date().toISOString(),steps:allSteps,attachedFiles:params.attachedFiles||[],error:`Source extraction paused after Q.${completed}. ${lastError}`,checkpoint};
+      }
+      lastTask=chunkTask;resumeQuestions=rawQuestionsFromTask(chunkTask);completed=resumeQuestions.length;
+      dispatchLiveStep({status:'checking',label:`SOURCE CHECKPOINT · ${completed}/${total}`,timestamp:new Date().toISOString(),details:`Checkpoint confirmed. Next range starts at Q.${completed+1}.`});
     }
     if(!lastTask)throw new Error('No source extraction request was completed.');
     const finalSteps=[...allSteps,{status:'completed' as TaskStep['status'],label:'SOURCE MISSION · 100% complete',timestamp:new Date().toISOString(),details:`All ${total} source questions captured and the final Word document was generated.`}];
