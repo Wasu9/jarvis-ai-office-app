@@ -86,8 +86,17 @@ function stripMathMarkers(text: string): string {
     .replace(/\\\[([\s\S]*?)\\\]/g, '$1');
 }
 
+function sanitizeTextInput(text: string): string {
+  return String(text || '')
+    // JSON interprets a LaTeX "\\f..." sequence as form-feed when it is not
+    // escaped deeply enough. Restore the intended LaTeX command prefix.
+    .replace(/\u000C/g, '\\f')
+    // XML 1.0 does not permit the remaining C0 control characters.
+    .replace(/[\u0000-\u0008\u000B\u000E-\u001F\u007F]/g, '');
+}
+
 function cleanPlainText(text: string): string {
-  let s = stripMathMarkers(String(text || '')).replace(/\\n/g, '\n');
+  let s = stripMathMarkers(sanitizeTextInput(String(text || ''))).replace(/\\n/g, '\n');
   for (const [name, symbol] of Object.entries(GREEK)) {
     s = s.replace(new RegExp(`\\\\${name}\\b`, 'g'), symbol);
   }
@@ -114,7 +123,7 @@ function readBalanced(source: string, start: number): { value: string; next: num
 }
 
 function latexComponents(latex: string): MathComponent[] {
-  const source = stripMathMarkers(String(latex || '').trim());
+  const source = sanitizeTextInput(stripMathMarkers(String(latex || '').trim()));
   const out: MathComponent[] = [];
   let buffer = '';
 
@@ -227,7 +236,7 @@ function hasMath(text: string): boolean {
 }
 
 function richChildren(text: string, options: TextOptions = {}): Array<TextRun | DocxMath> {
-  const source = String(text || '');
+  const source = sanitizeTextInput(String(text || ''));
   const baseRun = (value: string) => new TextRun({
     text: cleanPlainText(value), bold: options.bold, size: options.size,
     font: options.hindi ? 'Noto Sans Devanagari' : 'Aptos', color: options.color,
