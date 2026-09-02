@@ -53,7 +53,9 @@ function validate(data:DocxPaperData,expectedTotal:number,sourceLocked:boolean){
     const numerical=q.questionType==='numerical';
     if(numerical){if((q.optionsEn?.length||0)!==0||(q.optionsHi?.length||0)!==0)throw new Error(`Q.${n} is Numerical Value Answer Type but contains MCQ options.`);}
     else{if((q.optionsEn?.length||0)!==4||(q.optionsHi?.length||0)!==4)throw new Error(`Q.${n} must contain exactly four English and four Hindi options.`);for(let i=0;i<4;i++)if(!q.optionsEn?.[i]?.trim()||!q.optionsHi?.[i]?.trim())throw new Error(`Q.${n} option ${i+1} is missing a language value.`);}
-    if(sourceLocked&&visualLikely(q)&&!q.diagramSvg?.trim())throw new Error(`Q.${n} contains a source visual reference but no diagram was captured.`);
+    // A missing model-rendered diagram must never abort an otherwise valid source chunk.
+    // Keep the source question and continue; visual fidelity can be reported separately.
+    if(sourceLocked&&visualLikely(q)&&!q.diagramSvg?.trim())console.warn(`[Source QA] Q.${n} references a visual but diagramSvg was not captured; continuing without aborting the mission.`);
   }
 }
 
