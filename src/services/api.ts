@@ -7,7 +7,7 @@ function isConversational(prompt:string,selectedAgentId?:string,attachedFiles?:A
 function instantReply(prompt:string):string|null{if(!GREETINGS.test(prompt.trim()))return null;const p=prompt.trim().toLowerCase();if(p.includes('how are you')||p.includes('how r u'))return 'Bilkul ready hoon 😎 Systems online hain. Batao, kya karna hai?';if(p.includes('good morning'))return 'Good morning! ⚡ JARVIS online hai. Batao aaj kya mission hai?';if(p.includes('good afternoon'))return 'Good afternoon! ⚡ JARVIS ready hai. Batao kya kaam shuru karein?';if(p.includes('good evening'))return 'Good evening! ⚡ JARVIS ready hai. Kya kaam shuru karein?';return 'Hii! 👋 JARVIS online hai. Batao kya karna hai?';}
 
 type ChatHistory = Array<{role:'user'|'assistant';content:string}>;
-type TaskRequest = {userPrompt:string;selectedAgentId?:string;attachedFiles?:AttachedFile[];model?:string;settings?:Partial<JarvisSettings>;history?:ChatHistory;resumeFrom?:number;resumeQuestions?:any[]};
+type TaskRequest = {userPrompt:string;selectedAgentId?:string;attachedFiles?:AttachedFile[];model?:string;settings?:Partial<JarvisSettings>;history?:ChatHistory;resumeFrom?:number;resumeQuestions?:any[];sourceTotalQuestions?:number;sourceRange?:{start:number;end:number}};
 function requestedQuestionCount(prompt:string):number|null{const m=prompt.match(/\b(\d{1,3})\s*(?:questions?|qs?|प्रश्न)\b/i);return m?Number(m[1]):null;}
 function promptWithQuestionCount(prompt:string,count:number){const re=/\b\d{1,3}\s*(?:questions?|qs?|प्रश्न)\b/i;return re.test(prompt)?prompt.replace(re,`${count} questions`):`${prompt} Process exactly ${count} questions from the attached source.`;}
 function rawQuestionsFromTask(task:TaskRecord):any[]{try{const parsed=JSON.parse(String(task.result?.rawText||''));return Array.isArray(parsed.questions)?parsed.questions:[];}catch{return[];}}
@@ -38,19 +38,23 @@ export class ApiService{
     if(isSourceDocument){
       const total=detectedTotal&&detectedTotal>0?detectedTotal:await detectSourceQuestionCount(params);
       if(total>20)return this.executeLargeSourceTask(params,total);
-      return this.executeTaskStream({...params,userPrompt:promptWithQuestionCount(params.userPrompt,total)},step=>dispatchLiveStep(step));
+      return this.executeTaskStream({...params,userPrompt:promptWithQuestionCount(params.userPrompt,total),sourceTotalQuestions:total,sourceRange:{start:1,end:total}},step=>dispatchLiveStep(step));
     }
     return this.executeTaskStream(params,step=>dispatchLiveStep(step));
   }
   static async executeLargeSourceTask(params:TaskRequest,total:number):Promise<TaskRecord>{
     const started=Date.now();const chunkSize=20;const startFrom=Math.min(total,Math.max(1,Number(params.resumeFrom||1)));let completed=Math.max(0,startFrom-1);let resumeQuestions=Array.isArray(params.resumeQuestions)?[...params.resumeQuestions]:[];let lastTask:TaskRecord|null=null;const allSteps:TaskStep[]=[];
-    dispatchLiveStep({status:'generating',label:`SOURCE PLAN · ${total} questions · chunked execution`,timestamp:new Date().toISOString(),details:`Each source range runs in its own request so no single Vercel function can time out the full mission.`});
+    dispatchLiveStep({status:'generating',label:`SOURCE PLAN · ${total} questions · chunked execution`,timestamp:new Date().toISOString(),details:`Source count is locked at ${total}; no 180-question fallback exists.`});
     for(let start=startFrom;start<=total;start+=chunkSize){
-      const end=Math.min(start+chunkSize-1,total);const chunkPrompt=promptWithQuestionCount(params.userPrompt,end);dispatchLiveStep({status:'generating',label:`SOURCE CHUNK · Q.${start}–Q.${end}`,timestamp:new Date().toISOString(),details:`Overall mission: ${completed}/${total} captured. Processing this range independently.`});
+      const end=Math.min(start+chunkSize-1,total);
+      // IMPORTANT: the total is deliberately the first/only question-count phrase in this prompt.
+      // The server receives the real source total separately; the range is metadata, not the total.
+      const chunkPrompt=`${params.userPrompt} Process exactly ${total} questions from the attached source. CURRENT CHUNK ONLY: extract Q.${start}–Q.${end}. Do not process questions outside this range.`;
+      dispatchLiveStep({status:'generating',label:`SOURCE CHUNK · Q.${start}–Q.${end}`,timestamp:new Date().toISOString(),details:`Overall mission: ${completed}/${total} captured. Processing this range independently.`});
       let chunkTask:TaskRecord|null=null;let lastError='';
       for(let recoveryAttempt=1;recoveryAttempt<=3&&!chunkTask;recoveryAttempt++){
         try{
-          const candidate=await this.executeTaskStream({...params,userPrompt:chunkPrompt,resumeFrom:start>1?start:undefined,resumeQuestions:start>1?resumeQuestions:undefined},step=>{allSteps.push(step);dispatchLiveStep(step);});
+          const candidate=await this.executeTaskStream({...params,userPrompt:chunkPrompt,sourceTotalQuestions:total,sourceRange:{start,end},resumeFrom:start>1?start:undefined,resumeQuestions:start>1?resumeQuestions:undefined},step=>{allSteps.push(step);dispatchLiveStep(step);});
           if(candidate.status==='failed')throw new Error(candidate.error||'Source chunk execution failed.');
           chunkTask=candidate;
         }catch(e:any){
