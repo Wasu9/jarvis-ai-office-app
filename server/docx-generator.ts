@@ -9,7 +9,6 @@ import {
   MathRun,
   MathSubScript,
   MathSuperScript,
-  PageBreak,
   Packer,
   Paragraph,
   ShadingType,
@@ -60,6 +59,7 @@ type TextOptions = {
   before?: number;
   after?: number;
   keepNext?: boolean;
+  pageBreakBefore?: boolean;
 };
 
 type MathComponent = any;
@@ -260,6 +260,7 @@ function textParagraph(text: string, options: TextOptions = {}): Paragraph {
   return new Paragraph({
     alignment: options.align,
     keepNext: options.keepNext,
+    pageBreakBefore: options.pageBreakBefore,
     spacing: { before: options.before ?? 0, after: options.after ?? 35, line: options.hindi ? 260 : 275 },
     children: richChildren(text, options),
   });
@@ -322,7 +323,7 @@ async function renderDiagram(svg?: string): Promise<Paragraph | null> {
 }
 
 async function questionTable(q: NonNullable<DocxPaperData['questions']>[number], first: boolean): Promise<Table> {
-  const en: Paragraph[] = [textParagraph(`Q.${q.number}  ${q.textEn}`, { bold: true, size: 24, color: '0F172A', after: 45, keepNext: true })];
+  const en: Paragraph[] = [textParagraph(`Q.${q.number}  ${q.textEn}`, { bold: true, size: 24, color: '0F172A', after: 45, keepNext: true, pageBreakBefore: first })];
   const hi: Paragraph[] = [textParagraph(q.textHi || '', { bold: true, size: 20, color: '334155', hindi: true, after: 45, keepNext: true })];
   const diagram = await renderDiagram(q.diagramSvg);
   if (diagram) {
@@ -385,8 +386,6 @@ export async function generateDocxBuffer(data: DocxPaperData): Promise<Buffer> {
   children.push(new Paragraph({ spacing: { before: 80, after: 45 }, children: [new TextRun({ text: 'STUDENT DETAILS', bold: true, size: 20, color: '164E63' })] }));
   children.push(studentInfoTable());
   children.push(...instructionBlock(data.instructions || []));
-  children.push(new Paragraph({ children: [new PageBreak()] }));
-
   if (questions.length) {
     let previousSection = '';
     for (let i = 0; i < questions.length; i++) {
