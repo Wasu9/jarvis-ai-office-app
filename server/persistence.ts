@@ -81,8 +81,9 @@ export function saveMemories(memories: PersistedMemory[]): void {
 }
 
 function compactTask(task: TaskRecord): TaskRecord {
+  const { checkpoint: _checkpoint, ...withoutCheckpoint } = task;
   return {
-    ...task,
+    ...withoutCheckpoint,
     attachedFiles: task.attachedFiles.map(({ base64Data: _base64Data, ...file }) => file),
     result: task.result ? {
       ...task.result,
