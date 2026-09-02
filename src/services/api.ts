@@ -45,7 +45,9 @@ export class ApiService{
       let chunkTask:TaskRecord|null=null;let lastError='';
       for(let recoveryAttempt=1;recoveryAttempt<=3&&!chunkTask;recoveryAttempt++){
         try{
-          chunkTask=await this.executeTaskStream({...params,userPrompt:chunkPrompt,resumeFrom:start>1?start:undefined,resumeQuestions:start>1?resumeQuestions:undefined},step=>{allSteps.push(step);dispatchLiveStep(step);});
+          const candidate=await this.executeTaskStream({...params,userPrompt:chunkPrompt,resumeFrom:start>1?start:undefined,resumeQuestions:start>1?resumeQuestions:undefined},step=>{allSteps.push(step);dispatchLiveStep(step);});
+          if(candidate.status==='failed')throw new Error(candidate.error||'Source chunk execution failed.');
+          chunkTask=candidate;
         }catch(e:any){
           lastError=e?.message||'Source chunk execution failed.';
           if(recoveryAttempt>=3)break;
