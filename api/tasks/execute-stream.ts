@@ -21,6 +21,11 @@ export default async function handler(req: any, res: any) {
   res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders?.();
 
+  // Keep long Gemini extraction requests alive even while the model is thinking.
+  const heartbeat = setInterval(() => {
+    try { res.write(': heartbeat\n\n'); } catch { /* connection already closed */ }
+  }, 10000);
+
   try {
     const task = await TaskRunner.execute({
       ...req.body,
@@ -32,6 +37,7 @@ export default async function handler(req: any, res: any) {
   } catch (err: any) {
     res.write(`data: ${JSON.stringify({ type: 'error', error: err?.message || 'Task execution failed' })}\n\n`);
   } finally {
+    clearInterval(heartbeat);
     res.end();
   }
 }
