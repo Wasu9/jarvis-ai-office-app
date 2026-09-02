@@ -40,8 +40,8 @@ export interface AttachedFile {
   id: string;
   name: string;
   size: number;
-  type: string; // e.g. 'application/pdf', 'text/plain', 'image/png'
-  base64Data?: string; // for PDF/Image processing
+  type: string;
+  base64Data?: string;
   textPreview?: string;
   uploadedAt: string;
 }
@@ -79,6 +79,13 @@ export interface ExecutionResult {
   };
 }
 
+export interface TaskCheckpoint {
+  completedQuestions: number;
+  totalQuestions: number;
+  nextQuestion: number;
+  questions: any[];
+}
+
 export interface TaskRecord {
   id: string;
   title: string;
@@ -92,6 +99,7 @@ export interface TaskRecord {
   attachedFiles: AttachedFile[];
   result?: ExecutionResult;
   error?: string;
+  checkpoint?: TaskCheckpoint;
 }
 
 export interface JarvisMemoryItem {
