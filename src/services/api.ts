@@ -31,8 +31,8 @@ export class ApiService{
       if(!reply){const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:params.userPrompt,model:params.model||'gemini-3.7-flash',history:params.history||[]})});const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.error||'Conversational response failed');reply=String(data.reply||'');}
       const now=new Date();const steps:TaskStep[]=[{status:'waiting',label:'JARVIS Conversational Core ready',timestamp:new Date(started).toISOString()},{status:'generating',label:instant?'Instant response':'Response generated with conversation context',timestamp:now.toISOString()}];return{id:`chat-${started}`,title:params.userPrompt.slice(0,70)||'Conversation',userPrompt:params.userPrompt,agentId:'conversational-core',agentName:'JARVIS Conversational Core',status:'completed',createdAt:new Date(started).toISOString(),completedAt:now.toISOString(),steps,attachedFiles:[],result:{summary:'Conversational response',rawText:reply,structuredData:null,artifacts:[],agentUsed:{id:'conversational-core',name:'JARVIS Conversational Core'},metrics:{durationMs:Date.now()-started}} as any};
     }
-    const total=requestedQuestionCount(params.userPrompt);const isSourceDocument=!!params.attachedFiles?.length&&/bilingual|translate|translation|convert|extract|read|exact|same|faithful|preserve|hindi|अनुवाद|बाइलिंगुअल|जैसा है|सिर्फ|word format|docx/i.test(params.userPrompt);
-    if(isSourceDocument&&total&&total>20)return this.executeLargeSourceTask(params,total);
+    const detectedTotal=requestedQuestionCount(params.userPrompt);const total=detectedTotal||180;const isSourceDocument=!!params.attachedFiles?.length&&/bilingual|translate|translation|convert|extract|read|exact|same|faithful|preserve|hindi|अनुवाद|बाइलिंगुअल|जैसा है|सिर्फ|word format|docx/i.test(params.userPrompt);
+    if(isSourceDocument&&total>20)return this.executeLargeSourceTask(params,total);
     return this.executeTaskStream(params,step=>dispatchLiveStep(step));
   }
   static async executeLargeSourceTask(params:TaskRequest,total:number):Promise<TaskRecord>{
