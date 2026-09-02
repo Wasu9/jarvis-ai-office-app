@@ -14,21 +14,22 @@ function wantsKey(prompt:string){return /answer\s*key|उत्तर\s*कु�
 function wantsSolutions(prompt:string){return /solution|solutions|step[- ]by[- ]step|विस्तृत हल|हल सहित/i.test(prompt);}
 function extractJson(text:string):any{const cleaned=text.replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/i,'').trim();try{return JSON.parse(cleaned);}catch{}const a=cleaned.indexOf('{'),b=cleaned.lastIndexOf('}');if(a>=0&&b>a){try{return JSON.parse(cleaned.slice(a,b+1));}catch{}}throw new Error('JARVIS received invalid structured data and stopped before creating the Word file.');}
 function countRequested(prompt:string):number|null{const m=prompt.match(/\b(\d{1,3})\s*(?:questions?|qs?|प्रश्न)\b/i);return m?Number(m[1]):null;}
+function sleep(ms:number){return new Promise(r=>setTimeout(r,ms));}
 type PaperQuestion=NonNullable<DocxPaperData['questions']>[number];
 function visualLikely(q:PaperQuestion){const t=`${q.textEn||''} ${q.textHi||''}`.toLowerCase();return /(figure|fig\.|graph|plot|diagram|image|shown below|given below|चित्र|आरेख|ग्राफ|नीचे दिया|नीचे दिए)/i.test(t);}
 function normalizeOption(n:string){const s=String(n||'').trim().toUpperCase();return ({A:'1',B:'2',C:'3',D:'4'} as Record<string,string>)[s]||s;}
 function validate(data:DocxPaperData,prompt:string,sourceLocked:boolean){
-  const qs=data.questions||[],expected=countRequested(prompt);if(!qs.length)throw new Error('No questions were produced.');
-  if(expected!==null&&qs.length!==expected)throw new Error(`Question count mismatch: requested ${expected}, received ${qs.length}.`);
-  const seen=new Set<string>();
-  for(const q of qs){
-    const n=String(q.number).replace(/^Q\.?(?:Q\.)?/i,'');if(seen.has(n))throw new Error(`Duplicate question Q.${n}.`);seen.add(n);
-    if(!q.textEn?.trim()||!q.textHi?.trim())throw new Error(`Q.${n} is missing English or Hindi text.`);
-    if(!q.optionsEn||q.optionsEn.length!==4||!q.optionsHi||q.optionsHi.length!==4)throw new Error(`Q.${n} must contain four English and four Hindi options.`);
-    for(let i=0;i<4;i++)if(!q.optionsEn[i]?.trim()||!q.optionsHi[i]?.trim())throw new Error(`Q.${n} option ${i+1} is missing a language value.`);
-    if(!sourceLocked&&(wantsKey(prompt)||wantsSolutions(prompt))&&!/^[1-4]$/.test(normalizeOption(String(q.correctOption||''))))throw new Error(`Q.${n} has no valid numeric answer key.`);
-    if(sourceLocked&&visualLikely(q)&&!q.diagramSvg?.trim())throw new Error(`Q.${n} contains a source visual reference but no diagram was captured.`);
-  }
+ const qs=data.questions||[],expected=countRequested(prompt);if(!qs.length)throw new Error('No questions were produced.');
+ if(expected!==null&&qs.length!==expected)throw new Error(`Question count mismatch: requested ${expected}, received ${qs.length}.`);
+ const seen=new Set<string>();
+ for(const q of qs){
+  const n=String(q.number).replace(/^Q\.?(?:Q\.)?/i,'');if(seen.has(n))throw new Error(`Duplicate question Q.${n}.`);seen.add(n);
+  if(!q.textEn?.trim()||!q.textHi?.trim())throw new Error(`Q.${n} is missing English or Hindi text.`);
+  if(!q.optionsEn||q.optionsEn.length!==4||!q.optionsHi||q.optionsHi.length!==4)throw new Error(`Q.${n} must contain four English and four Hindi options.`);
+  for(let i=0;i<4;i++)if(!q.optionsEn[i]?.trim()||!q.optionsHi[i]?.trim())throw new Error(`Q.${n} option ${i+1} is missing a language value.`);
+  if(!sourceLocked&&(wantsKey(prompt)||wantsSolutions(prompt))&&!/^[1-4]$/.test(normalizeOption(String(q.correctOption||''))))throw new Error(`Q.${n} has no valid numeric answer key.`);
+  if(sourceLocked&&visualLikely(q)&&!q.diagramSvg?.trim())throw new Error(`Q.${n} contains a source visual reference but no diagram was captured.`);
+ }
 }
 
 export class TaskRunner{
@@ -56,34 +57,41 @@ export class TaskRunner{
   const memory=memoryStore.getMemoryPromptContext(),configuredInstitute=params.settings?.instituteName||'',configuredExam=params.settings?.targetExam||params.settings?.defaultTargetExam||'',structured=isPaperAgent(agent.id);
   const lockRules=locked?`\n\nSOURCE-LOCK MODE — DOCUMENT CONVERSION/READING ONLY:\n- The attached file is the sole source of truth for source-derived content.\n- Copy source header, institute, date, exam/class, subject, instructions, numbering, question text, options, tables, formulas, units, symbols and diagrams faithfully.\n- Do not add, remove, correct, rewrite, summarize, normalize, reorder, merge or improve source content.\n- Do not use JARVIS settings as replacements for source metadata.\n- Do not add answer keys, solutions, explanations, summaries or new headings unless already in the source or explicitly requested.\n- English source text stays unchanged. Translate only into the requested target language.\n- Preserve source errors/ambiguities instead of silently fixing them.\n- Options are stored as four values only; the Word renderer will label them (1), (2), (3), (4). Never prepend A/B/C/D to option text.\n- IMPORTANT: Preserve mathematics as LaTeX inside the text fields. Use \\frac{numerator}{denominator} for fractions, ^{...} for superscripts, _{...} for subscripts, \\sqrt{...} for roots, and LaTeX Greek/symbol commands such as \\alpha, \\beta, \\gamma, \\times, \\pm, \\propto. Never flatten a fraction or equation into plain slash text.\n- If the source contains a diagram, graph, chart, figure or image needed by a question, you MUST populate diagramSvg with a complete standalone valid SVG that reproduces the visible geometry, labels, axes, curves, arrows and important text as closely as possible. Never omit a source visual.\n- If the source question says Figure/Fig./Graph/Plot/Diagram/Shown below/Given below or equivalent Hindi wording, diagramSvg is mandatory.\n- Creative generation is disabled for source-derived content.`:'';
   const system=`${agent.systemPrompt}\n\n${memory}\n\nJARVIS PRODUCTION RULES:\n- Never invent, silently correct, merge, reorder or drop source content.\n- Preserve mathematical notation, units, superscripts, subscripts, Greek letters, fractions and scientific notation.\n- For bilingual output every question and every 1-4 option needs English and Hindi fields.\n- Creative generation is allowed only when the user explicitly asks to create new content.${lockRules}\n${structured?'\nReturn ONLY valid JSON matching the schema. No markdown fences or commentary.':''}`;
-  add('generating',locked?'Processing source · content creation disabled':`Generating with ${params.model||'Gemini 3.7 Flash'}`);
+  add('generating',locked?'Processing source · parallel extraction mode':`Generating with ${params.model||'Gemini 3.7 Flash'}`);
   let raw='';let generationError='';const provider=aiRegistry.getProvider('gemini');const inline=(params.attachedFiles||[]).filter(f=>!!f.base64Data).map(f=>({mimeType:f.type||'application/pdf',data:(f.base64Data||'').replace(/^data:[^;]+;base64,/,'')}));
   try{
-    if(structured&&locked&&inline.length){
-      const merged:any={title:'',instituteName:'',examType:'',subject:'',duration:'',totalMarks:'',instructions:[],questions:[]};
-      const chunkSize=30;
-      let sawEmpty=false;
-      for(let startQ=1;startQ<=180&&!sawEmpty;startQ+=chunkSize){
-        const endQ=startQ+chunkSize-1;
-        add('working',`SOURCE EXTRACTION · Q.${startQ}–Q.${endQ}`,`Reading this question range directly from the uploaded PDF. No source content is generated.`);
-        let chunkRaw='';let chunkError='';
-        for(let attempt=1;attempt<=2;attempt++){
-          try{
-            chunkRaw=await provider.generateText(`Extract ONLY the complete questions numbered ${startQ} through ${endQ} from the attached PDF. Read every page needed to find this range. Return every question in that range in exact source order. If the PDF ends before ${startQ}, return an empty questions array. For every question return English text, faithful Hindi translation, exactly four options in order, and diagramSvg when the source question contains a graph/figure/image. Preserve all formulas using LaTeX: \\frac{...}{...}, ^{...}, _{...}, \\sqrt{...} and symbol commands. Do not summarize, skip, invent, correct, or renumber anything.`,{systemInstruction:system,model:params.model||'gemini-3.7-flash',responseMimeType:'application/json',responseSchema:PAPER_SCHEMA,inlineFiles:inline});
-            chunkError='';break;
-          }catch(e:any){chunkError=e.message||'Generation failed';if(attempt===1)add('working',`Retrying source range Q.${startQ}–Q.${endQ}`);}
-        }
-        if(chunkError)throw new Error(`Source extraction failed for Q.${startQ}–Q.${endQ}: ${chunkError}`);
-        const chunk=extractJson(chunkRaw);
-        const questions=Array.isArray(chunk.questions)?chunk.questions:[];
-        if(!questions.length){sawEmpty=true;break;}
-        if(!merged.title){Object.assign(merged,{title:chunk.title||'',instituteName:chunk.instituteName||'',examType:chunk.examType||'',subject:chunk.subject||'',duration:chunk.duration||'',totalMarks:chunk.totalMarks??'',instructions:Array.isArray(chunk.instructions)?chunk.instructions:[]});}
-        merged.questions.push(...questions);
+   if(structured&&locked&&inline.length){
+    const requested=countRequested(params.userPrompt);const totalQ=requested&&requested>0?requested:180;const chunkSize=20;const chunks:Array<{start:number;end:number}>=[];
+    for(let startQ=1;startQ<=totalQ;startQ+=chunkSize)chunks.push({start:startQ,end:Math.min(startQ+chunkSize-1,totalQ)});
+    const merged:any={title:'',instituteName:'',examType:'',subject:'',duration:'',totalMarks:'',instructions:[],questions:[]};
+    const extractChunk=async(c:{start:number;end:number})=>{
+      let lastError='';
+      for(let attempt=1;attempt<=3;attempt++){
+       try{
+        add('working',`SOURCE EXTRACTION · Q.${c.start}–Q.${c.end}`,`Batch ${Math.ceil(c.start/chunkSize)} · attempt ${attempt}`);
+        const chunkRaw=await provider.generateText(`Extract ONLY the complete questions numbered ${c.start} through ${c.end} from the attached PDF. Read every page needed to locate this range. Return every question in exact source order. Return exactly ${c.end-c.start+1} questions when those numbers exist. If the document ends before ${c.start}, return an empty questions array. For every question return English text, faithful Hindi translation, exactly four options in order, and diagramSvg when the source question contains a graph/figure/image. Preserve all formulas using LaTeX: \\frac{...}{...}, ^{...}, _{...}, \\sqrt{...} and symbol commands. Do not summarize, skip, invent, correct, merge, or renumber anything.`,{systemInstruction:system,model:params.model||'gemini-3.7-flash',responseMimeType:'application/json',responseSchema:PAPER_SCHEMA,inlineFiles:inline});
+        const chunk=extractJson(chunkRaw);const questions=Array.isArray(chunk.questions)?chunk.questions:[];
+        if(!questions.length&&c.start<=totalQ)throw new Error(`Empty extraction for Q.${c.start}–Q.${c.end}.`);
+        if(questions.length!==c.end-c.start+1)throw new Error(`Incomplete batch Q.${c.start}–Q.${c.end}: received ${questions.length}.`);
+        const nums=questions.map((q:any)=>Number(String(q.number||'').replace(/^Q\.?(?:Q\.)?/i,'')));
+        for(let i=0;i<nums.length;i++)if(nums[i]!==c.start+i)throw new Error(`Batch numbering mismatch: expected Q.${c.start+i}, received Q.${nums[i]||'?'}.'`);
+        return {chunk,questions};
+       }catch(e:any){lastError=e?.message||'Generation failed';if(attempt<3){add('working',`Retrying source batch Q.${c.start}–Q.${c.end}`,lastError);await sleep(1200*attempt);}}
       }
-      raw=JSON.stringify(merged);
-    }else{
-      for(let attempt=1;attempt<=2;attempt++){try{raw=await provider.generateText(attempt===1?params.userPrompt:`Repair the previous JARVIS output. Return a complete valid response that satisfies the original request exactly. Do not omit content. ${params.userPrompt}`,{systemInstruction:system,model:params.model||'gemini-3.7-flash',responseMimeType:structured?'application/json':undefined,responseSchema:structured?PAPER_SCHEMA:undefined,inlineFiles:inline.length?inline:undefined});generationError='';break;}catch(e:any){generationError=e.message||'Generation failed';if(attempt===1)add('working','Retrying AI generation after transient failure');}}
+      throw new Error(`Source extraction failed for Q.${c.start}–Q.${c.end} after 3 attempts: ${lastError}`);
+    };
+    const concurrency=3;
+    for(let i=0;i<chunks.length;i+=concurrency){
+      const batch=chunks.slice(i,i+concurrency);add('working',`PARALLEL EXTRACTION · ${batch.map(c=>`Q.${c.start}–${c.end}`).join(' + ')}`,`Processing ${batch.length} source ranges concurrently.`);
+      const results=await Promise.all(batch.map(extractChunk));
+      for(const result of results){const chunk=result.chunk;if(!merged.title){Object.assign(merged,{title:chunk.title||'',instituteName:chunk.instituteName||'',examType:chunk.examType||'',subject:chunk.subject||'',duration:chunk.duration||'',totalMarks:chunk.totalMarks??'',instructions:Array.isArray(chunk.instructions)?chunk.instructions:[]});}merged.questions.push(...result.questions);}
+      merged.questions.sort((a:any,b:any)=>Number(String(a.number).replace(/^Q\.?(?:Q\.)?/i,''))-Number(String(b.number).replace(/^Q\.?(?:Q\.)?/i,'')));
+      add('checking',`SOURCE CHECKPOINT · ${Math.min((i+batch.length)*chunkSize,totalQ)}/${totalQ} questions captured`,`Completed and validated parallel source batches.`);
     }
+    raw=JSON.stringify(merged);
+   }else{
+    for(let attempt=1;attempt<=2;attempt++){try{raw=await provider.generateText(attempt===1?params.userPrompt:`Repair the previous JARVIS output. Return a complete valid response that satisfies the original request exactly. Do not omit content. ${params.userPrompt}`,{systemInstruction:system,model:params.model||'gemini-3.7-flash',responseMimeType:structured?'application/json':undefined,responseSchema:structured?PAPER_SCHEMA:undefined,inlineFiles:inline.length?inline:undefined});generationError='';break;}catch(e:any){generationError=e.message||'Generation failed';if(attempt===1)add('working','Retrying AI generation after transient failure');}}
+   }
   }catch(e:any){generationError=e.message||'Generation failed';}
   if(generationError)return fail(`Generation failed: ${generationError}`);
   add('checking',locked?'Running source-fidelity + bilingual QA':'Running structural + output QA');let data:DocxPaperData;
