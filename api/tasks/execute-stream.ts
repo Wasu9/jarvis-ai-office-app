@@ -21,18 +21,49 @@ export default async function handler(req: any, res: any) {
   res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders?.();
 
-  // Keep long Gemini extraction requests alive even while the model is thinking.
   const heartbeat = setInterval(() => {
     try { res.write(': heartbeat\n\n'); } catch { /* connection already closed */ }
   }, 10000);
 
   try {
-    const task = await TaskRunner.execute({
-      ...req.body,
-      onStep: (step: any) => {
-        res.write(`data: ${JSON.stringify({ type: 'step', step })}\n\n`);
-      },
-    });
+    const body = req.body || {};
+    const sourceChunk = Number(body?.sourceRange?.start || 1) > 1 && Array.isArray(body?.resumeQuestions);
+    const Runner: any = TaskRunner;
+    const originalValidateSequence = Runner.validateSequence;
+
+    // The server validates the cumulative document (Q1..current), while sourceRange
+    // identifies only the chunk being extracted. Never start cumulative sequence QA at Q21.
+    if (sourceChunk && typeof originalValidateSequence === 'function') {
+      Runner.validateSequence = function (data: any, expected: number) {
+        return originalValidateSequence.call(this, data, expected, 1);
+      };
+    }
+
+    let task: any = null;
+    let lastError = '';
+    const maxAttempts = sourceChunk ? 3 : 1;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        if (attempt > 1) {
+          res.write(`data: ${JSON.stringify({ type: 'step', step: { status: 'generating', label: `AUTO-RESUME · Q.${body.sourceRange.start}–Q.${body.sourceRange.end}`, timestamp: new Date().toISOString(), details: `Automatic retry ${attempt}/${maxAttempts}; no manual action required.` } })}\n\n`);
+        }
+        task = await TaskRunner.execute({
+          ...body,
+          onStep: (step: any) => {
+            res.write(`data: ${JSON.stringify({ type: 'step', step })}\n\n`);
+          },
+        });
+        if (task?.status !== 'failed') break;
+        lastError = task?.error || 'Task execution failed.';
+      } catch (err: any) {
+        lastError = err?.message || 'Task execution failed.';
+      }
+    }
+
+    if (task?.status === 'failed' && sourceChunk) {
+      task = { ...task, error: `Automatic source-chunk retries exhausted: ${lastError || task.error || 'unknown error'}` };
+    }
     res.write(`data: ${JSON.stringify({ type: 'task', task })}\n\n`);
   } catch (err: any) {
     res.write(`data: ${JSON.stringify({ type: 'error', error: err?.message || 'Task execution failed' })}\n\n`);
