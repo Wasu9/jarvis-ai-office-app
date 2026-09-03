@@ -15,24 +15,51 @@ jobs:
           from pathlib import Path
           p=Path('server/docx-generator.ts')
           s=p.read_text()
-          s=s.replace('const BODY_SIZE = 22;', 'const BODY_SIZE = 24;\nconst MATH_SIZE = 24;')
+          if 'const MATH_SIZE' not in s:
+              s=s.replace('const BODY_SIZE = 22;', 'const BODY_SIZE = 24;\nconst MATH_SIZE = 24;')
           s=s.replace("const FONT_EN = 'Aptos';", "const FONT_EN = 'Times New Roman';")
-          s=s.replace("new MathRun(cleanPlainText(buffer))", "new MathRun({ text: cleanPlainText(buffer), font: FONT_MATH, size: MATH_SIZE })")
+          s=s.replace('new MathRun(cleanPlainText(buffer))', 'new MathRun({ text: cleanPlainText(buffer), font: FONT_MATH, size: MATH_SIZE })')
           s=s.replace("new MathRun('')", "new MathRun({ text: '', font: FONT_MATH, size: MATH_SIZE })")
-          s=s.replace("new MathRun(GREEK[command])", "new MathRun({ text: GREEK[command], font: FONT_MATH, size: MATH_SIZE })")
-          s=s.replace("new MathRun(symbols[command])", "new MathRun({ text: symbols[command], font: FONT_MATH, size: MATH_SIZE })")
+          s=s.replace('new MathRun(GREEK[command])', 'new MathRun({ text: GREEK[command], font: FONT_MATH, size: MATH_SIZE })')
+          s=s.replace('new MathRun(symbols[command])', 'new MathRun({ text: symbols[command], font: FONT_MATH, size: MATH_SIZE })')
           a=s.index('function richChildren'); b=s.index('\nfunction textParagraph',a)
-          rich=r'''function richChildren(text: string, options: TextOptions = {}): Array<TextRun | DocxMath> {\n  const source=sanitizeTextInput(String(text||''));\n  const baseRun=(value:string)=>new TextRun({text:cleanPlainText(value),bold:options.bold,size:options.size??BODY_SIZE,font:options.hindi?FONT_HI:FONT_EN,color:options.color});\n  if(!hasMath(source)) return [baseRun(source)];\n  const output:Array<TextRun|DocxMath>=[]; const pattern=/\\[\\[MATH:([\\s\\S]*?)\\]\\]|\\$\\$([\\s\\S]*?)\\$\\$|\\$([^$\\n]+)\\$|\\\\\\(([\\s\\S]*?)\\\\\\)/g;\n  let last=0; let match:RegExpExecArray|null;\n  while((match=pattern.exec(source))){ const before=source.slice(last,match.index); if(before) output.push(baseRun(before)); if(before&&!/\\s$/.test(before)) output.push(baseRun(' ')); output.push(mathNode(match[1]??match[2]??match[3]??match[4]??'')); const next=source.slice(match.index+match[0].length,match.index+match[0].length+1); if(next&&!/\\s|[.,;:!?%)\\]}]/.test(next)) output.push(baseRun(' ')); last=match.index+match[0].length; }\n  if(last<source.length) output.push(baseRun(source.slice(last))); return output.length?output:[baseRun('')];\n}\n'''
+          rich=r'''function richChildren(text: string, options: TextOptions = {}): Array<TextRun | DocxMath> {
+            const source=sanitizeTextInput(String(text||''));
+            const baseRun=(value:string)=>new TextRun({text:cleanPlainText(value),bold:options.bold,size:options.size??BODY_SIZE,font:options.hindi?FONT_HI:FONT_EN,color:options.color});
+            if(!hasMath(source)) return [baseRun(source)];
+            const output:Array<TextRun|DocxMath>=[]; const pattern=/\[\[MATH:([\s\S]*?)\]\]|\$\$([\s\S]*?)\$\$|\$([^$\n]+)\$|\\\(([\s\S]*?)\\\)/g;
+            let last=0; let match:RegExpExecArray|null;
+            while((match=pattern.exec(source))){ const before=source.slice(last,match.index); if(before) output.push(baseRun(before)); if(before&&!/\s$/.test(before)) output.push(baseRun(' ')); output.push(mathNode(match[1]??match[2]??match[3]??match[4]??'')); const next=source.slice(match.index+match[0].length,match.index+match[0].length+1); if(next&&!/\s|[.,;:!?%)\]}]/.test(next)) output.push(baseRun(' ')); last=match.index+match[0].length; }
+            if(last<source.length) output.push(baseRun(source.slice(last))); return output.length?output:[baseRun('')];
+          }
+'''
           s=s[:a]+rich+s[b:]
-          pos=s.index('async function questionTable')
-          helper=r'''function needsSourceImage(q: NonNullable<DocxPaperData['questions']>[number]): boolean { const n=Number(String(q.number).replace(/^Q\.?/i,'')); if([35,36,37,38,47,54,62,65,67,74,83,169].includes(n)) return true; return /(graph|plot|diagram|figure|fig\.?|image|shown below|given below|shown in (?:the )?figure|चित्र|ग्राफ|आरेख)/i.test(`${q.textEn||''} ${q.textHi||''}`); }\nfunction sourceImagePlaceholderSvg(n: number|string): string { const safe=String(n).replace(/[^0-9A-Za-z.]/g,''); return `<svg xmlns="http://www.w3.org/2000/svg" width="720" height="210"><rect x="6" y="6" width="708" height="198" rx="10" fill="#F8FAFC" stroke="#64748B" stroke-width="3"/><text x="360" y="100" text-anchor="middle" font-family="Arial" font-size="25" fill="#334155">Q.${safe} — ORIGINAL PDF IMAGE PLACEHOLDER</text><text x="360" y="138" text-anchor="middle" font-family="Arial" font-size="17" fill="#64748B">Insert the original source PDF image here</text></svg>`; }\n'''
-          s=s[:pos]+helper+s[pos:]
-          a=s.index('async function questionTable'); b=s.index('\nfunction appendAnswerKey',a); q=s[a:b]
-          old='  const diagram = await renderDiagram(q.diagramSvg);\n  if (diagram) { en.push(diagram); const hindiDiagram = await renderDiagram(q.diagramSvg); if (hindiDiagram) hi.push(hindiDiagram); }'
-          new='  if (needsSourceImage(q)) { const ph=await renderDiagram(sourceImagePlaceholderSvg(q.number)); if(ph){ en.push(ph); const hp=await renderDiagram(sourceImagePlaceholderSvg(q.number)); if(hp) hi.push(hp); } } else if (q.diagramSvg?.trim()) { const diagram=await renderDiagram(q.diagramSvg); if(diagram){ en.push(diagram); const hindiDiagram=await renderDiagram(q.diagramSvg); if(hindiDiagram) hi.push(hindiDiagram); } }'
-          if old not in q: raise SystemExit('question diagram target not found')
-          q=q.replace(old,new,1)
-          s=s[:a]+q+s[b:]
+          if 'function needsSourceImage' not in s:
+              pos=s.index('async function questionTable')
+              helper=r'''function needsSourceImage(q: NonNullable<DocxPaperData['questions']>[number]): boolean {
+            const n=Number(String(q.number).replace(/^Q\.?/i,''));
+            if([35,36,37,38,47,54,62,65,67,74,83,169].includes(n)) return true;
+            return /(graph|plot|diagram|figure|fig\.?|image|shown below|given below|shown in (?:the )?figure|चित्र|ग्राफ|आरेख)/i.test(`${q.textEn||''} ${q.textHi||''}`);
+          }
+          function sourceImagePlaceholderSvg(n: number|string): string {
+            const safe=String(n).replace(/[^0-9A-Za-z.]/g,'');
+            return `<svg xmlns="http://www.w3.org/2000/svg" width="720" height="210"><rect x="6" y="6" width="708" height="198" rx="10" fill="#F8FAFC" stroke="#64748B" stroke-width="3"/><text x="360" y="100" text-anchor="middle" font-family="Arial" font-size="25" fill="#334155">Q.${safe} — ORIGINAL PDF IMAGE PLACEHOLDER</text><text x="360" y="138" text-anchor="middle" font-family="Arial" font-size="17" fill="#64748B">Insert the original source PDF image here</text></svg>`;
+          }
+          '' '
+              s=s[:pos]+helper+s[pos:]
+          # Replace the existing diagram rendering block, regardless of prior placeholder patches.
+          qstart=s.index('async function questionTable')
+          qend=s.index('\nfunction appendAnswerKey',qstart)
+          q=s[qstart:qend]
+          q=re.sub(r'\s*const diagram = await renderDiagram\(q\.diagramSvg\);\s*if \(diagram\) \{[^}]*?\}\s*', '\n  if (needsSourceImage(q)) { const ph=await renderDiagram(sourceImagePlaceholderSvg(q.number)); if(ph){ en.push(ph); const hp=await renderDiagram(sourceImagePlaceholderSvg(q.number)); if(hp) hi.push(hp); } } else if (q.diagramSvg?.trim()) { const diagram=await renderDiagram(q.diagramSvg); if(diagram){ en.push(diagram); const hindiDiagram=await renderDiagram(q.diagramSvg); if(hindiDiagram) hi.push(hindiDiagram); } }\n', q, count=1)
+          # If previous code had no const-diagram block, force a placeholder block after the Hindi question paragraph.
+          if 'if (needsSourceImage(q))' not in q:
+              needle="  const hi: any[] = [textParagraph(cleanQ(q.textHi || ''), { bold: true, size: QUESTION_SIZE, color: '334155', hindi: true, after: 45, keepNext: true })];"
+              if needle in q:
+                  q=q.replace(needle, needle+"\n  if (needsSourceImage(q)) { const ph=await renderDiagram(sourceImagePlaceholderSvg(q.number)); if(ph){ en.push(ph); const hp=await renderDiagram(sourceImagePlaceholderSvg(q.number)); if(hp) hi.push(hp); } }",1)
+              else:
+                  raise SystemExit('questionTable insertion point not found')
+          s=s[:qstart]+q+s[qend:]
           p.write_text(s)
           PY
           git config user.name 'github-actions[bot]'
