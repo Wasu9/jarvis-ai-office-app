@@ -8,6 +8,8 @@ export interface AICompletionOptions {
   responseSchema?: Record<string, any>;
   inlineFiles?: Array<{ mimeType: string; data: string }>;
   model?: string;
+  /** Avoid duplicating a PDF with a large MarkItDown text companion. */
+  skipDocumentContext?: boolean;
 }
 
 export interface AIProvider {
@@ -17,7 +19,7 @@ export interface AIProvider {
 }
 
 const DEFAULT_MODEL = 'gemini-3.7-flash';
-const FALLBACK_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite'];
+const FALLBACK_MODELS = ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite'];
 const MARKDOWN_CONTEXT_LIMIT = 160_000;
 const markItDown = new MarkItDown();
 
@@ -38,12 +40,6 @@ function stripDataUrl(data: string): string {
   return String(data || '').replace(/^data:[^;]+;base64,/, '');
 }
 
-/**
- * Build a deterministic text companion for uploaded documents while retaining
- * the original inline file for Gemini visual understanding. This is especially
- * useful for scanned/complex PDFs where direct structured extraction can return
- * an empty question array even though the document contains readable text.
- */
 async function buildDocumentContext(files?: Array<{ mimeType: string; data: string }>): Promise<string> {
   if (!files?.length) return '';
   const sections: string[] = [];
@@ -52,9 +48,7 @@ async function buildDocumentContext(files?: Array<{ mimeType: string; data: stri
       const bytes = Buffer.from(stripDataUrl(file.data), 'base64');
       const result = await markItDown.convertBuffer(bytes, { file_extension: extensionForMime(file.mimeType) });
       const markdown = String(result?.markdown || '').trim();
-      if (markdown) {
-        sections.push(`DOCUMENT TEXT EXTRACT (${file.mimeType}):\n${markdown.slice(0, MARKDOWN_CONTEXT_LIMIT)}`);
-      }
+      if (markdown) sections.push(`DOCUMENT TEXT EXTRACT (${file.mimeType}):\n${markdown.slice(0, MARKDOWN_CONTEXT_LIMIT)}`);
     } catch (error) {
       console.warn('[MarkItDown] Document context extraction failed; keeping original inline file.', error);
     }
@@ -81,10 +75,10 @@ export class GeminiProvider implements AIProvider {
   private classifyError(err: any): 'quota' | 'unavailable' | 'invalid' | 'other' {
     const message = String(err?.message || err || '').toLowerCase();
     const status = String(err?.status || err?.code || '').toLowerCase();
-    if (status.includes('resource_exhausted') || message.includes('resource_exhausted') || message.includes('quota') || message.includes('rate limit')) return 'quota';
+    if (status.includes('resource_exhausted') || message.includes('resource_exhausted') || message.includes('quota') || message.includes('rate limit') || message.includes('too many requests')) return 'quota';
     if (status.includes('503') || message.includes('503') || message.includes('unavailable') || message.includes('high demand') || message.includes('temporarily')) return 'unavailable';
     if (status.includes('404') || status.includes('not_found') || message.includes('not found') || message.includes('no longer available') || message.includes('shut down') || message.includes('shutdown') || message.includes('retired')) return 'unavailable';
-    if (status.includes('400') || message.includes('invalid argument')) return 'invalid';
+    if (status.includes('400') || message.includes('invalid argument') || message.includes('invalid value')) return 'invalid';
     return 'other';
   }
 
@@ -95,13 +89,17 @@ export class GeminiProvider implements AIProvider {
     const requestedModel = options?.model?.trim() || DEFAULT_MODEL;
     const models = [requestedModel, ...FALLBACK_MODELS].filter((m, i, arr) => arr.indexOf(m) === i);
     const contentsParts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [];
-    if (options?.inlineFiles?.length) for (const file of options.inlineFiles) contentsParts.push({ inlineData: { mimeType: file.mimeType, data: file.data } });
+    if (options?.inlineFiles?.length) {
+      for (const file of options.inlineFiles) {
+        if (file.data) contentsParts.push({ inlineData: { mimeType: file.mimeType, data: file.data } });
+      }
+    }
 
-    // Give Gemini both representations: the original file for visual fidelity
-    // and deterministic Markdown text for reliable question/metadata extraction.
-    const documentContext = await buildDocumentContext(options?.inlineFiles);
-    if (documentContext) {
-      contentsParts.push({ text: `${documentContext}\n\nUse the document text above as an extraction aid, but treat the attached original document as authoritative for visual layout, diagrams, symbols and source fidelity.` });
+    if (!options?.skipDocumentContext) {
+      const documentContext = await buildDocumentContext(options?.inlineFiles);
+      if (documentContext) {
+        contentsParts.push({ text: `${documentContext}\n\nUse the document text above as an extraction aid, but treat the attached original document as authoritative for visual layout, diagrams, symbols and source fidelity.` });
+      }
     }
     contentsParts.push({ text: prompt });
 
@@ -133,7 +131,7 @@ export class GeminiProvider implements AIProvider {
 
     console.error('[GeminiProvider Error]', lastError);
     const kind = this.classifyError(lastError);
-    if (kind === 'quota') throw new Error('Gemini quota is currently exhausted for the configured project/model. Wait for the quota window to reset or enable billing/increase the Gemini API quota, then retry JARVIS.');
+    if (kind === 'quota') throw new Error('Gemini quota is currently exhausted for the configured project/model. JARVIS tried the production fallback models; retry after the quota window resets or enable billing/increase the Gemini API quota.');
     if (kind === 'unavailable') throw new Error('Gemini models are temporarily unavailable for this request. JARVIS tried the configured production fallback models; please retry in a moment.');
     if (kind === 'invalid') throw new Error(`Gemini rejected the request. ${lastError?.message || ''}`.trim());
     throw new Error(`Gemini could not complete the request. ${lastError?.message || String(lastError)}`.trim());
