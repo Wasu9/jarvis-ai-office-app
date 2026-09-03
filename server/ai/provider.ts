@@ -5,6 +5,7 @@ export interface AICompletionOptions {
   temperature?: number;
   responseMimeType?: string;
   responseSchema?: Record<string, any>;
+  model?: string;
   inlineFiles?: Array<{ mimeType: string; data: string }>;
   skipDocumentContext?: boolean;
 }

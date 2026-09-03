@@ -92,16 +92,16 @@ function readBalanced(source:string,start:number):{value:string;next:number}|nul
 }
 function latexComponents(latex:string):MathComponent[] {
   const source=sanitizeTextInput(stripMathMarkers(latex).trim()); const out:MathComponent[]=[]; let buffer='';
-  const flush=()=>{if(buffer){out.push(new MathRun({text:cleanPlainText(buffer),font:FONT_MATH,size:MATH_SIZE}));buffer='';}};
-  const attachScript=(kind:'sup'|'sub',value:string)=>{const base=out.pop()||new MathRun({text:'',font:FONT_MATH,size:MATH_SIZE});const script=latexComponents(value);if(kind==='sup')out.push(new MathSuperScript({children:[base],superScript:script}));else out.push(new MathSubScript({children:[base],subScript:script}));};
+  const flush=()=>{if(buffer){out.push(new MathRun(cleanPlainText(buffer)));buffer='';}};
+  const attachScript=(kind:'sup'|'sub',value:string)=>{const base=out.pop()||new MathRun('');const script=latexComponents(value);if(kind==='sup')out.push(new MathSuperScript({children:[base],superScript:script}));else out.push(new MathSubScript({children:[base],subScript:script}));};
   for(let i=0;i<source.length;){
     if(source.startsWith('\\frac',i)){flush();let j=i+5;while(/\s/.test(source[j]||''))j++;const num=readBalanced(source,j);if(num){j=num.next;while(/\s/.test(source[j]||''))j++;const den=readBalanced(source,j);if(den){out.push(new MathFraction({numerator:latexComponents(num.value),denominator:latexComponents(den.value)}));i=den.next;continue;}}buffer+='\\frac';i+=5;continue;}
     if(source.startsWith('\\sqrt',i)){flush();let j=i+5;while(/\s/.test(source[j]||''))j++;const body=readBalanced(source,j);if(body){out.push(new MathRadical({children:latexComponents(body.value)}));i=body.next;continue;}buffer+='√';i+=5;continue;}
     if(source[i]==='^'||source[i]==='_'){const kind=source[i]==='^'?'sup':'sub';let j=i+1;let value='';if(source[j]==='{'){const group=readBalanced(source,j);if(group){value=group.value;j=group.next;}}else{value=source[j]||'';j++;}if(value){flush();attachScript(kind,value);i=j;continue;}}
-    if(source[i]==='\\'){const match=source.slice(i+1).match(/^([A-Za-z]+)/);if(match){const command=match[1];if(GREEK[command]){flush();out.push(new MathRun({text:GREEK[command],font:FONT_MATH,size:MATH_SIZE}));i+=command.length+1;continue;}const symbols:Record<string,string>={times:'×',cdot:'·',pm:'±',mp:'∓',leq:'≤',geq:'≥',neq:'≠',propto:'∝',infty:'∞',approx:'≈',rightarrow:'→',to:'→',degree:'°',sin:'sin',cos:'cos',tan:'tan',log:'log',ln:'ln',left:'',right:''};if(command in symbols){flush();if(symbols[command])out.push(new MathRun({text:symbols[command],font:FONT_MATH,size:MATH_SIZE}));i+=command.length+1;continue;}}}
+    if(source[i]==='\\'){const match=source.slice(i+1).match(/^([A-Za-z]+)/);if(match){const command=match[1];if(GREEK[command]){flush();out.push(new MathRun(GREEK[command]));i+=command.length+1;continue;}const symbols:Record<string,string>={times:'×',cdot:'·',pm:'±',mp:'∓',leq:'≤',geq:'≥',neq:'≠',propto:'∝',infty:'∞',approx:'≈',rightarrow:'→',to:'→',degree:'°',sin:'sin',cos:'cos',tan:'tan',log:'log',ln:'ln',left:'',right:''};if(command in symbols){flush();if(symbols[command])out.push(new MathRun(symbols[command]));i+=command.length+1;continue;}}}
     buffer+=source[i++];
   }
-  flush();return out.length?out:[new MathRun({text:'',font:FONT_MATH,size:MATH_SIZE})];
+  flush();return out.length?out:[new MathRun('')];
 }
 function mathNode(latex:string):DocxMath{return new DocxMath({children:latexComponents(latex)});}
 function hasMath(text:string):boolean{return /\[\[MATH:[\s\S]*?\]\]|\$\$[\s\S]*?\$\$|\$[^$\n]+\$|\\\([\s\S]*?\\\)/.test(text);}
@@ -166,13 +166,8 @@ async function questionTable(q:NonNullable<DocxPaperData['questions']>[number],f
   const cleanQ=(v:string)=>sanitizeTextInput(v).trim().replace(/^\s*Q\.?\s*\d+\s*[:.)-]?\s*/i,'');
   const en:any[]=[textParagraph(`Q.${q.number}  ${cleanQ(q.textEn)}`,{bold:true,size:QUESTION_SIZE,color:'0F172A',after:45,keepNext:true,pageBreakBefore:first})];
   const hi:any[]=[textParagraph(cleanQ(q.textHi||''),{bold:true,size:QUESTION_SIZE,color:'334155',hindi:true,after:45,keepNext:true})];
-  if(needsSourceImage(q)){
-    const ph=await renderDiagram(sourceImagePlaceholderSvg(q.number));
-    if(ph){en.push(ph);const hp=await renderDiagram(sourceImagePlaceholderSvg(q.number));if(hp)hi.push(hp);}
-  }else if(q.diagramSvg?.trim()){
-    const diagram=await renderDiagram(q.diagramSvg);
-    if(diagram){en.push(diagram);const hp=await renderDiagram(q.diagramSvg);if(hp)hi.push(hp);}
-  }
+  if(needsSourceImage(q)){ const ph=sourceImagePlaceholder(`Q.${q.number}`); en.push(ph); hi.push(sourceImagePlaceholder(`Q.${q.number}`)); }
+  else if(q.diagramSvg?.trim()){ const diagram=await renderDiagram(q.diagramSvg); if(diagram){en.push(diagram);const hp=await renderDiagram(q.diagramSvg);if(hp)hi.push(hp);} }
   if(q.questionType!=='numerical'){
     const enOptions=q.optionsEn||[]; const hiOptions=q.optionsHi||[];
     const enMatch=isMatchColumn(q.textEn,enOptions); const hiMatch=isMatchColumn(q.textHi||'',hiOptions);
