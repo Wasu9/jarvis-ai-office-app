@@ -1,4 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
+import { MarkItDown } from 'markitdown-ts';
 
 export interface AICompletionOptions {
   systemInstruction?: string;
@@ -17,6 +18,49 @@ export interface AIProvider {
 
 const DEFAULT_MODEL = 'gemini-3.7-flash';
 const FALLBACK_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite'];
+const MARKDOWN_CONTEXT_LIMIT = 160_000;
+const markItDown = new MarkItDown();
+
+function extensionForMime(mimeType: string): string {
+  const mime = String(mimeType || '').toLowerCase();
+  if (mime.includes('pdf')) return '.pdf';
+  if (mime.includes('wordprocessingml')) return '.docx';
+  if (mime.includes('spreadsheetml')) return '.xlsx';
+  if (mime.includes('presentationml')) return '.pptx';
+  if (mime.includes('html')) return '.html';
+  if (mime.includes('csv')) return '.csv';
+  if (mime.includes('json')) return '.json';
+  if (mime.includes('text/')) return '.txt';
+  return '.bin';
+}
+
+function stripDataUrl(data: string): string {
+  return String(data || '').replace(/^data:[^;]+;base64,/, '');
+}
+
+/**
+ * Build a deterministic text companion for uploaded documents while retaining
+ * the original inline file for Gemini visual understanding. This is especially
+ * useful for scanned/complex PDFs where direct structured extraction can return
+ * an empty question array even though the document contains readable text.
+ */
+async function buildDocumentContext(files?: Array<{ mimeType: string; data: string }>): Promise<string> {
+  if (!files?.length) return '';
+  const sections: string[] = [];
+  for (const file of files) {
+    try {
+      const bytes = Buffer.from(stripDataUrl(file.data), 'base64');
+      const result = await markItDown.convertBuffer(bytes, { file_extension: extensionForMime(file.mimeType) });
+      const markdown = String(result?.markdown || '').trim();
+      if (markdown) {
+        sections.push(`DOCUMENT TEXT EXTRACT (${file.mimeType}):\n${markdown.slice(0, MARKDOWN_CONTEXT_LIMIT)}`);
+      }
+    } catch (error) {
+      console.warn('[MarkItDown] Document context extraction failed; keeping original inline file.', error);
+    }
+  }
+  return sections.join('\n\n--- DOCUMENT BREAK ---\n\n');
+}
 
 export class GeminiProvider implements AIProvider {
   name = 'Gemini 3.7 Flash';
@@ -39,8 +83,6 @@ export class GeminiProvider implements AIProvider {
     const status = String(err?.status || err?.code || '').toLowerCase();
     if (status.includes('resource_exhausted') || message.includes('resource_exhausted') || message.includes('quota') || message.includes('rate limit')) return 'quota';
     if (status.includes('503') || message.includes('503') || message.includes('unavailable') || message.includes('high demand') || message.includes('temporarily')) return 'unavailable';
-    // A model that has been retired, shut down, or is unavailable to a project
-    // must not terminate the fallback chain. Google returns these as 404/NOT_FOUND.
     if (status.includes('404') || status.includes('not_found') || message.includes('not found') || message.includes('no longer available') || message.includes('shut down') || message.includes('shutdown') || message.includes('retired')) return 'unavailable';
     if (status.includes('400') || message.includes('invalid argument')) return 'invalid';
     return 'other';
@@ -54,6 +96,13 @@ export class GeminiProvider implements AIProvider {
     const models = [requestedModel, ...FALLBACK_MODELS].filter((m, i, arr) => arr.indexOf(m) === i);
     const contentsParts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [];
     if (options?.inlineFiles?.length) for (const file of options.inlineFiles) contentsParts.push({ inlineData: { mimeType: file.mimeType, data: file.data } });
+
+    // Give Gemini both representations: the original file for visual fidelity
+    // and deterministic Markdown text for reliable question/metadata extraction.
+    const documentContext = await buildDocumentContext(options?.inlineFiles);
+    if (documentContext) {
+      contentsParts.push({ text: `${documentContext}\n\nUse the document text above as an extraction aid, but treat the attached original document as authoritative for visual layout, diagrams, symbols and source fidelity.` });
+    }
     contentsParts.push({ text: prompt });
 
     let lastError: any = null;
