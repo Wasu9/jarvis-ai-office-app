@@ -21,32 +21,29 @@ jobs:
           p=Path('server/docx-generator.ts')
           s=p.read_text(encoding='utf-8')
 
-          # Repair control-character damage from LaTeX transport.
-          s=re.sub(r"function sanitizeTextInput\(text:string\):string \{.*?\n\}", r'''function sanitizeTextInput(text:string):string {
+          sanitize=r'''function sanitizeTextInput(text:string):string {
             let s=String(text||'');
             s=s.replace(/\u0009ext\b/g,'\\text');
             s=s.replace(/\u000D(alpha|beta|gamma|delta|Delta|epsilon|theta|lambda|mu|pi|rho|sigma|tau|phi|varphi|omega|Omega|kappa|eta|zeta|nu|xi|chi|psi)\b/g,'\\$1');
             s=s.replace(/\u0009/g,' ').replace(/\u000D/g,'');
             return s.replace(/\u000C/g,'\\f').replace(/[\u0000-\u0008\u000B\u000E-\u001F\u007F]/g,'')
               .replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#39;/g,"'");
-          }''', s, count=1, flags=re.S)
+          }'''
+          s,n=re.subn(r"function sanitizeTextInput\(text:string\):string \{.*?\n\}",lambda m:sanitize,s,count=1,flags=re.S)
+          if n!=1: raise SystemExit('sanitizeTextInput not found')
 
-          # Repair visible remnants such as ralpha/rbeta and extH2extO.
-          s=re.sub(r"function cleanPlainText\(text:string\):string \{.*?\n\}", r'''function cleanPlainText(text:string):string {
+          clean=r'''function cleanPlainText(text:string):string {
             let s=stripMathMarkers(text).replace(/\\n/g,'\n');
             s=s.replace(/\bralpha\b/g,'α').replace(/\brbeta\b/g,'β').replace(/\brgamma\b/g,'γ').replace(/\brdelta\b/g,'δ').replace(/\brtheta\b/g,'θ').replace(/\brlambda\b/g,'λ').replace(/\brmu\b/g,'μ').replace(/\brpi\b/g,'π').replace(/\brsigma\b/g,'σ').replace(/\brphi\b/g,'φ').replace(/\bromega\b/g,'ω');
             s=s.replace(/\bext(?=[A-Z][A-Za-z0-9]*(?:\^|_|\b))/g,'');
             for(const [name,symbol] of Object.entries(GREEK)) s=s.replace(new RegExp(`\\\\${name}\\b`,'g'),symbol);
             return s.replace(/\\times/g,'×').replace(/\\cdot/g,'·').replace(/\\pm/g,'±').replace(/\\mp/g,'∓').replace(/\\leq/g,'≤').replace(/\\geq/g,'≥').replace(/\\neq/g,'≠').replace(/\\propto/g,'∝').replace(/\\infty/g,'∞').replace(/\\approx/g,'≈').replace(/\\rightarrow/g,'→').replace(/\\to/g,'→').replace(/\\degree/g,'°').replace(/\\cdots/g,'…').replace(/\\(?:mathrm|text|mathbf|mathit|vec|overline)\{([^{}]+)\}/g,'$1').replace(/[{}]/g,'').trim();
-          }''', s, count=1, flags=re.S)
+          }'''
+          s,n=re.subn(r"function cleanPlainText\(text:string\):string \{.*?\n\}",lambda m:clean,s,count=1,flags=re.S)
+          if n!=1: raise SystemExit('cleanPlainText not found')
 
-          # Insert helpers once.
           helper=r'''function sourceImagePlaceholder(label:string):Paragraph {
             return new Paragraph({alignment:AlignmentType.CENTER,spacing:{before:50,after:60},children:[new TextRun({text:`[ ORIGINAL PDF IMAGE PLACEHOLDER${label?` — ${label}`:''} ]`,bold:true,size:20,font:FONT_EN,color:'64748B'})]});
-          }
-          function visualOption(text:string):boolean {
-            const x=cleanPlainText(text).trim();
-            return !x || /^(?:Graph|ग्राफ|Figure|Fig\.?|Image|चित्र)\s*(?:\(?[1-4A-D]\)?)?$/i.test(x);
           }
           function needsSourceImage(q:any):boolean {
             const n=Number(q?.number);
@@ -61,7 +58,7 @@ jobs:
           if 'function sourceImagePlaceholder' not in s:
               s=s.replace('async function questionTable',helper+'async function questionTable',1)
 
-          # Change only the label cleaner: visual options become an explicit placeholder in the existing option renderer.
+          # Keep the existing option-table layout, but turn graph-only option labels into manual placeholders.
           start=s.find('function stripLeadingLabel(text:string,label?:number):string{')
           end=s.find('\n}\nfunction field',start)
           if start<0 or end<0: raise SystemExit('stripLeadingLabel not found')
@@ -74,11 +71,10 @@ jobs:
           }'''
           s=s[:start]+fn+s[end+2:]
 
-          # Existing question renderer already calls renderDiagram(q.diagramSvg); feed it a placeholder SVG for figure questions.
           qhead="async function questionTable(q:NonNullable<DocxPaperData['questions']>[number],first:boolean):Promise<Table>{"
           qpos=s.find(qhead)
           if qpos<0: raise SystemExit('questionTable not found')
-          if 'applySourceQA(q);' not in s[qpos:qpos+1200]:
+          if 'applySourceQA(q);' not in s[qpos:qpos+1000]:
               ins='''\n  applySourceQA(q);\n  if(needsSourceImage(q) && !q.diagramSvg) q.diagramSvg=`<svg xmlns="http://www.w3.org/2000/svg" width="900" height="180"><rect x="8" y="8" width="884" height="164" fill="#F8FAFC" stroke="#94A3B8" stroke-width="3" stroke-dasharray="10 8"/><text x="450" y="82" text-anchor="middle" font-family="Arial" font-size="26" font-weight="700" fill="#475569">ORIGINAL PDF IMAGE PLACEHOLDER</text><text x="450" y="122" text-anchor="middle" font-family="Arial" font-size="20" fill="#64748B">Replace with the exact image from the source PDF</text></svg>`;'''
               s=s[:qpos+len(qhead)]+ins+s[qpos+len(qhead):]
 
