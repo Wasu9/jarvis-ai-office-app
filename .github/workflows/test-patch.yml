@@ -9,11 +9,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Patch renderer and commit
+      - name: Patch renderer and provider
         run: |
           python3 scripts/patch_docx.py
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add server/docx-generator.ts
-          git commit -m 'fix: improve DOCX math typography and visual placeholders' || exit 0
+          git add server/docx-generator.ts server/ai/provider.ts
+          git commit -m 'fix: improve DOCX math typography and source verification' || exit 0
           git push
