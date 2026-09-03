@@ -58,21 +58,21 @@ jobs:
           if 'function sourceImagePlaceholder' not in s:
               s=s.replace('async function questionTable',helper+'async function questionTable',1)
 
-          # Existing optionTable adds the canonical label. For visual-only option payloads, return a manual placeholder text.
-          s,n=re.subn(r"function stripLeadingLabel\(text:string,label\?:number\):string\{.*?\nfunction field", r'''function stripLeadingLabel(text:string,label?:number):string{
+          fn=r'''function stripLeadingLabel(text:string,label?:number):string{
             let s=sanitizeTextInput(text).trim();
             s=s.replace(/^\s*[\(\[]\s*[1-4]\s*[\)\]]\s*/i,'').replace(/^\s*(?:Option|विकल्प)\s*[1-4]\s*[:.\-]\s*/i,'');
             if(label!==undefined)s=s.replace(new RegExp(`^\\s*${label}\\s*[.)]\\s*`),'');
             if(!s || /^(?:Graph|ग्राफ|Figure|Fig\.?|Image|चित्र)\s*(?:\(?[1-4A-D]\)?)?$/i.test(s)) return `[ ORIGINAL PDF IMAGE PLACEHOLDER — OPTION ${label??''} ]`;
             return s.trim();
           }
-          function field''', s,count=1,flags=re.S)
+          '''
+          s,n=re.subn(r"function stripLeadingLabel\(text:string,label\?:number\):string\{.*?\}\n(?=function field)",lambda m:fn,s,count=1,flags=re.S)
           if n!=1: raise SystemExit('stripLeadingLabel not found')
 
           qhead="async function questionTable(q:NonNullable<DocxPaperData['questions']>[number],first:boolean):Promise<Table>{"
           qpos=s.find(qhead)
           if qpos<0: raise SystemExit('questionTable not found')
-          if 'applySourceQA(q);' not in s[qpos:qpos+1200]:
+          if 'applySourceQA(q);' not in s[qpos:qpos+1000]:
               ins='''\n  applySourceQA(q);\n  if(needsSourceImage(q) && !q.diagramSvg) q.diagramSvg=`<svg xmlns="http://www.w3.org/2000/svg" width="900" height="180"><rect x="8" y="8" width="884" height="164" fill="#F8FAFC" stroke="#94A3B8" stroke-width="3" stroke-dasharray="10 8"/><text x="450" y="82" text-anchor="middle" font-family="Arial" font-size="26" font-weight="700" fill="#475569">ORIGINAL PDF IMAGE PLACEHOLDER</text><text x="450" y="122" text-anchor="middle" font-family="Arial" font-size="20" fill="#64748B">Replace with the exact image from the source PDF</text></svg>`;'''
               s=s[:qpos+len(qhead)]+ins+s[qpos+len(qhead):]
 
