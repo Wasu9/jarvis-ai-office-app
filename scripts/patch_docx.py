@@ -1,5 +1,4 @@
 from pathlib import Path
-import re
 
 p=Path('server/docx-generator.ts')
 s=p.read_text()
@@ -11,21 +10,67 @@ s=s.replace('new MathRun(GREEK[command])','new MathRun({text:GREEK[command],font
 s=s.replace('new MathRun(symbols[command])','new MathRun({text:symbols[command],font:FONT_MATH,size:MATH_SIZE})')
 
 a=s.index('function richChildren'); b=s.index('\nfunction textParagraph',a)
-rich='''function richChildren(text: string, options: TextOptions = {}): Array<TextRun | DocxMath> {\n  const source=sanitizeTextInput(String(text||''));\n  const baseRun=(value:string)=>new TextRun({text:cleanPlainText(value),bold:options.bold,size:options.size??BODY_SIZE,font:options.hindi?FONT_HI:FONT_EN,color:options.color});\n  if(!hasMath(source)) return [baseRun(source)];\n  const output:Array<TextRun|DocxMath>=[];\n  const pattern=/\\[\\[MATH:([\\s\\S]*?)\\]\\]|\\$\\$([\\s\\S]*?)\\$\\$|\\$([^$\\n]+)\\$|\\\\\\(([\\s\\S]*?)\\\\\\)/g;\n  let last=0; let match:RegExpExecArray|null;\n  while((match=pattern.exec(source))){\n    const before=source.slice(last,match.index); if(before) output.push(baseRun(before));\n    if(before&&!/\\s$/.test(before)) output.push(baseRun(' '));\n    output.push(mathNode(match[1]??match[2]??match[3]??match[4]??''));\n    const next=source.slice(match.index+match[0].length,match.index+match[0].length+1);\n    if(next&&!/\\s|[.,;:!?%)\\]}]/.test(next)) output.push(baseRun(' '));\n    last=match.index+match[0].length;\n  }\n  if(last<source.length) output.push(baseRun(source.slice(last)));\n  return output.length?output:[baseRun('')];\n}\n'''
-s=s[:a]+rich+s[b:]
+s=s[:a]+r'''function richChildren(text: string, options: TextOptions = {}): Array<TextRun | DocxMath> {
+  const source=sanitizeTextInput(String(text||''));
+  const baseRun=(value:string)=>new TextRun({text:cleanPlainText(value),bold:options.bold,size:options.size??BODY_SIZE,font:options.hindi?FONT_HI:FONT_EN,color:options.color});
+  if(!hasMath(source)) return [baseRun(source)];
+  const output:Array<TextRun|DocxMath>=[];
+  const pattern=/\[\[MATH:([\s\S]*?)\]\]|\$\$([\s\S]*?)\$\$|\$([^$\n]+)\$|\\\(([\s\S]*?)\\\)/g;
+  let last=0; let match:RegExpExecArray|null;
+  while((match=pattern.exec(source))){
+    const before=source.slice(last,match.index); if(before) output.push(baseRun(before));
+    if(before&&!/\s$/.test(before)) output.push(baseRun(' '));
+    output.push(mathNode(match[1]??match[2]??match[3]??match[4]??''));
+    const next=source.slice(match.index+match[0].length,match.index+match[0].length+1);
+    if(next&&!/\s|[.,;:!?%)\]}]/.test(next)) output.push(baseRun(' '));
+    last=match.index+match[0].length;
+  }
+  if(last<source.length) output.push(baseRun(source.slice(last)));
+  return output.length?output:[baseRun('')];
+}
+''' + s[b:]
 
-if 'function needsSourceImage' not in s:
-    pos=s.index('async function questionTable')
-    helper='''function needsSourceImage(q: NonNullable<DocxPaperData['questions']>[number]): boolean {\n  const n=Number(String(q.number).replace(/^Q\\.?/i,''));\n  if([35,36,37,38,47,54,62,65,67,74,83,169].includes(n)) return true;\n  return /(graph|plot|diagram|figure|fig\\.?|image|shown below|given below|shown in (?:the )?figure|चित्र|ग्राफ|आरेख)/i.test(`${q.textEn||''} ${q.textHi||''}`);\n}\nfunction sourceImagePlaceholderSvg(n: number|string): string {\n  const safe=String(n).replace(/[^0-9A-Za-z.]/g,'');\n  return `<svg xmlns="http://www.w3.org/2000/svg" width="720" height="210"><rect x="6" y="6" width="708" height="198" rx="10" fill="#F8FAFC" stroke="#64748B" stroke-width="3"/><text x="360" y="100" text-anchor="middle" font-family="Arial" font-size="25" fill="#334155">Q.${safe} — ORIGINAL PDF IMAGE PLACEHOLDER</text><text x="360" y="138" text-anchor="middle" font-family="Arial" font-size="17" fill="#64748B">Insert the original source PDF image here</text></svg>`;\n}\n'''
-    s=s[:pos]+helper+s[pos:]
+# Replace the complete question renderer. This avoids depending on any older placeholder patch shape.
+a=s.index('async function questionTable'); b=s.index('\nfunction appendAnswerKey',a)
+question=r'''async function questionTable(q:NonNullable<DocxPaperData['questions']>[number],first:boolean):Promise<Table>{
+  const cleanQ=(v:string)=>sanitizeTextInput(v).trim().replace(/^\s*Q\.?\s*\d+\s*[:.)-]?\s*/i,'');
+  const en:any[]=[textParagraph(`Q.${q.number}  ${cleanQ(q.textEn)}`,{bold:true,size:QUESTION_SIZE,color:'0F172A',after:45,keepNext:true,pageBreakBefore:first})];
+  const hi:any[]=[textParagraph(cleanQ(q.textHi||''),{bold:true,size:QUESTION_SIZE,color:'334155',hindi:true,after:45,keepNext:true})];
+  if(needsSourceImage(q)){
+    const ph=await renderDiagram(sourceImagePlaceholderSvg(q.number));
+    if(ph){en.push(ph);const hp=await renderDiagram(sourceImagePlaceholderSvg(q.number));if(hp)hi.push(hp);}
+  }else if(q.diagramSvg?.trim()){
+    const diagram=await renderDiagram(q.diagramSvg);
+    if(diagram){en.push(diagram);const hp=await renderDiagram(q.diagramSvg);if(hp)hi.push(hp);}
+  }
+  if(q.questionType!=='numerical'){
+    const enOptions=q.optionsEn||[]; const hiOptions=q.optionsHi||[];
+    const enMatch=isMatchColumn(q.textEn,enOptions); const hiMatch=isMatchColumn(q.textHi||'',hiOptions);
+    const mtEn=enMatch?(matchTableFromQuestion(q.textEn,false)||matchTable(enOptions,false)):null;
+    const mtHi=hiMatch?(matchTableFromQuestion(q.textHi||'',true)||matchTable(hiOptions,true)):null;
+    if(mtEn&&mtHi){en.push(mtEn);hi.push(mtHi);}else{en.push(optionTable(enOptions,false));hi.push(optionTable(hiOptions,true));}
+  }
+  const rows:TableRow[]=[];
+  if(first)rows.push(new TableRow({cantSplit:true,children:[makeCell([textParagraph('ENGLISH',{bold:true,size:BODY_SIZE,color:'FFFFFF',align:AlignmentType.CENTER,after:0})],50,'164E63'),makeCell([textParagraph('हिन्दी',{bold:true,size:BODY_SIZE,color:'FFFFFF',hindi:true,align:AlignmentType.CENTER,after:0})],50,'164E63')]}));
+  rows.push(new TableRow({cantSplit:true,children:[makeCell(en,50,'F8FAFC'),makeCell(hi,50,'F8FAFC')]}));
+  return new Table({width:{size:100,type:WidthType.PERCENTAGE},rows,borders:{...THIN_BORDERS,insideHorizontal:{style:BorderStyle.SINGLE,size:2,color:'E2E8F0'},insideVertical:{style:BorderStyle.SINGLE,size:4,color:'CBD5E1'}}});
+}
+'''
+s=s[:a]+question+s[b:]
 
-# Always force the source-image placeholder for the known visual questions.
-a=s.index('async function questionTable'); b=s.index('\nfunction appendAnswerKey',a); q=s[a:b]
-if 'if (needsSourceImage(q))' not in q:
-    needle=re.search(r"\n\s*const hi\s*=\s*\[textParagraph\([^\n]+\)\];",q)
-    if not needle: raise SystemExit('questionTable insertion point not found')
-    ins="\n  if (needsSourceImage(q)) { const ph=await renderDiagram(sourceImagePlaceholderSvg(q.number)); if(ph){ en.push(ph); const hp=await renderDiagram(sourceImagePlaceholderSvg(q.number)); if(hp) hi.push(hp); } }"
-    q=q[:needle.end()]+ins+q[needle.end():]
-s=s[:a]+q+s[b:]
+# Add a source-text matching-table parser before questionTable if absent.
+if 'function matchTableFromQuestion' not in s:
+  pos=s.index('async function questionTable')
+  helper=r'''function matchTableFromQuestion(text:string,hindi=false):Table|null{
+  const body=sanitizeTextInput(text).split(/\(\s*1\s*\)/)[0];
+  const alpha=[...body.matchAll(/(?:^|\s)([A-D])\s*[.)]\s*([\s\S]*?)(?=\s+[A-D]\s*[.)]\s*|\s+(?:I|II|III|IV|1|2|3|4)\s*[.)\-:]\s*|$)/gi)].map(m=>({label:m[1].toUpperCase(),value:m[2].trim()}));
+  const second=[...body.matchAll(/(?:^|\s)(I|II|III|IV|1|2|3|4)\s*[.)\-:]\s*([\s\S]*?)(?=\s+(?:I|II|III|IV|1|2|3|4)\s*[.)\-:]\s*|\s+[A-D]\s*[.)]\s*|$)/gi)].map(m=>({label:m[1].toUpperCase(),value:m[2].trim()}));
+  if(alpha.length<2||second.length<2)return null;
+  const rows=alpha.slice(0,4).map((x,i)=>({a:`${x.label}. ${x.value}`,b:`${second[i].label}. ${second[i].value}`}));
+  return new Table({width:{size:100,type:WidthType.PERCENTAGE},rows:[new TableRow({cantSplit:true,children:[makeCell([textParagraph('Column I',{bold:true,size:BODY_SIZE,hindi,align:AlignmentType.CENTER,after:0})],50,'E2E8F0'),makeCell([textParagraph('Column II',{bold:true,size:BODY_SIZE,hindi,align:AlignmentType.CENTER,after:0})],50,'E2E8F0')]}),...rows.map(r=>new TableRow({cantSplit:true,children:[makeCell([textParagraph(r.a,{size:BODY_SIZE,hindi,after:0})],50),makeCell([textParagraph(r.b,{size:BODY_SIZE,hindi,after:0})],50)]}))],borders:THIN_BORDERS});
+}
+'''
+  s=s[:pos]+helper+s[pos:]
+
 p.write_text(s)
-print('DOCX renderer patched')
+print('DOCX renderer patched',len(s))
