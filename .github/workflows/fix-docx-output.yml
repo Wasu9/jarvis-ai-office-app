@@ -1,0 +1,88 @@
+name: Fix DOCX output
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch-docx:
+    if: ${{ !contains(github.event.head_commit.message, '[docx-patch]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch DOCX generator
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          p = Path('server/docx-generator.ts')
+          s = p.read_text(encoding='utf-8')
+
+          # Repair control-character damage introduced when LaTeX commands pass through JSON/text extraction.
+          old = """function sanitizeTextInput(text:string):string {\n  return String(text||'').replace(/\\u000C/g,'\\\\f').replace(/[\\u0000-\\u0008\\u000B\\u000E-\\u001F\\u007F]/g,'')\n    .replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&').replace(/&quot;/g,'\"').replace(/&#39;/g,\"'\");\n}"""
+          new = """function sanitizeTextInput(text:string):string {\n  let s = String(text||'');\n  // JSON/transport can turn \\text into TAB+ext and \\alpha into CR+alpha. Restore those forms first.\n  s = s.replace(/\\u0009ext\\b/g, '\\\\text').replace(/\\u000D(alpha|beta|gamma|delta|Delta|epsilon|theta|lambda|mu|pi|rho|sigma|tau|phi|varphi|omega|Omega|kappa|eta|zeta|nu|xi|chi|psi)\\b/g, '\\\\$1');\n  s = s.replace(/\\u0009/g, ' ').replace(/\\u000D/g, '');\n  return s.replace(/\\u000C/g,'\\\\f').replace(/[\\u0000-\\u0008\\u000B\\u000E-\\u001F\\u007F]/g,'')\n    .replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&').replace(/&quot;/g,'\"').replace(/&#39;/g,\"'\");\n}"""
+          if old in s:
+              s = s.replace(old, new, 1)
+
+          # Make plain-text cleanup robust to the literal remnants seen in the generated DOCX.
+          marker = "function cleanPlainText(text:string):string {"
+          start = s.find(marker)
+          if start >= 0:
+              end = s.find("\n}\nfunction readBalanced", start)
+              if end >= 0:
+                  fn = s[start:end+2]
+                  if "ralpha" not in fn:
+                      fn = fn.replace("let s=stripMathMarkers(text).replace(/\\\\n/g,'\\n');", "let s=stripMathMarkers(text).replace(/\\\\n/g,'\\n');\n  s=s.replace(/\\bralph\\a\\b/g,'α').replace(/\\bralpha\\b/g,'α').replace(/\\brbeta\\b/g,'β').replace(/\\brgamma\\b/g,'γ').replace(/\\brdelta\\b/g,'δ').replace(/\\brtheta\\b/g,'θ').replace(/\\brlambda\\b/g,'λ').replace(/\\brmu\\b/g,'μ').replace(/\\brpi\\b/g,'π').replace(/\\brsigma\\b/g,'σ').replace(/\\brphi\\b/g,'φ').replace(/\\bromega\\b/g,'ω');")
+                  s = s[:start] + fn + s[end+2:]
+
+          # Add a visible, non-generated placeholder for source-PDF figures/graphs.
+          insert_before = "async function questionTable"
+          helper = r'''function imagePlaceholder(label:string):Paragraph {\n  return new Paragraph({ alignment:AlignmentType.CENTER, spacing:{before:60,after:60}, children:[new TextRun({text:`[ IMAGE PLACEHOLDER — INSERT ORIGINAL PDF IMAGE HERE${label?` — ${label}`:''} ]`, bold:true, size:20, font:FONT_EN, color:'64748B'})] });\n}\nfunction visualOptionText(text:string):boolean {\n  const s=cleanPlainText(text);\n  return !s || /^(?:graph|ग्राफ|figure|fig\\.?|image|चित्र)\\s*(?:\\(?[1-4A-D]\\)?)?$/i.test(s);\n}\nfunction needsSourceImage(q:any):boolean {\n  const n=Number(q?.number);\n  if([35,36,37,38,47,54,62,65,67,74,83,169].includes(n)) return true;\n  const t=cleanPlainText(`${q?.textEn||''} ${q?.textHi||''}`);\n  return /(shown in (?:the )?(?:figure|fig\\.)|shown below|shown in figure|given (?:molecule|compound|hydrocarbon)|following (?:figure|diagram|structure)|labelled [1-9]|dipole moment of is|in the hydrocarbon)/i.test(t);\n}\n'''
+          if insert_before in s and 'function imagePlaceholder' not in s:
+              s=s.replace(insert_before, helper+insert_before, 1)
+
+          # Replace the option-table function so graph/figure options get placeholders rather than fake drawings.
+          pat = re.compile(r"function optionTable\\(options:string\\[\\],hindi=false\\):Table\\{.*?\n\}\nfunction isMatchColumn", re.S)
+          replacement = r'''function optionTable(options:string[],hindi=false):Table{\n  const cleaned=options.slice(0,4).map((o,i)=>({label:`(${i+1})`,text:stripLeadingLabel(o,i+1)}));\n  const long=cleaned.some(x=>x.text.length>42); const rows:TableRow[]=[];\n  const cellFor=(x:{label:string;text:string})=>{\n    const visual=visualOptionText(x.text);\n    return makeCell([textParagraph(`${x.label} ${visual?'':''}`,{size:BODY_SIZE,hindi,after:8}), ...(visual?[imagePlaceholder(`Option ${x.label.replace(/[()]/g,'')}`)]:[textParagraph(x.text,{size:BODY_SIZE,hindi,after:8})])],50);\n  };\n  if(long){for(const x of cleaned)rows.push(new TableRow({cantSplit:true,children:[makeCell([textParagraph(x.label,{size:BODY_SIZE,hindi,after:4}),...(visualOptionText(x.text)?[imagePlaceholder(`Option ${x.label.replace(/[()]/g,'')}`)]:[textParagraph(x.text,{size:BODY_SIZE,hindi,after:8})])],100)]}));}\n  else{for(let i=0;i<cleaned.length;i+=2){const pair=cleaned.slice(i,i+2);rows.push(new TableRow({cantSplit:true,children:pair.map(cellFor)}));}}\n  return new Table({width:{size:100,type:WidthType.PERCENTAGE},rows,borders:{top:{style:BorderStyle.NONE,size:0,color:'FFFFFF'},bottom:{style:BorderStyle.NONE,size:0,color:'FFFFFF'},left:{style:BorderStyle.NONE,size:0,color:'FFFFFF'},right:{style:BorderStyle.NONE,size:0,color:'FFFFFF'},insideHorizontal:{style:BorderStyle.NONE,size:0,color:'FFFFFF'},insideVertical:{style:BorderStyle.NONE,size:0,color:'FFFFFF'}}});\n}\nfunction isMatchColumn'''
+          s,n=pat.subn(replacement,s,count=1)
+
+          # Add a source-image placeholder after the English question text when the question requires a figure.\n          qpat=re.compile(r"async function questionTable\\(q:NonNullable<DocxPaperData\['questions'\]>\[number\],first:boolean\):Promise<Table>\\{", re.S)
+          qhead="async function questionTable(q:NonNullable<DocxPaperData['questions']>[number],first:boolean):Promise<Table>{"
+          if qhead in s and "const sourceImage = needsSourceImage(q);" not in s:
+              s=s.replace(qhead, qhead+"\n  const sourceImage = needsSourceImage(q);", 1)
+              # Insert placeholder immediately before the first options table/diagram block in the function.\n              # This targets the existing function without changing its surrounding document structure.\n              qstart=s.find(qhead)
+              qend=s.find("\n}\n",qstart)
+              if qend<0: qend=len(s)
+              qbody=s[qstart:qend]
+              anchor="const opt"
+              if anchor in qbody:
+                  qbody=qbody.replace(anchor,"const sourceImageBlock = sourceImage ? [imagePlaceholder(`Question ${q.number}`)] : [];\n  "+anchor,1)
+              else:
+                  # Fallback: put the placeholder before the first return/table construction.\n                  m=re.search(r"\n(\\s*)(?:return new Table|const rows)",qbody)
+                  if m:
+                      qbody=qbody[:m.start()]+"\n  const sourceImageBlock = sourceImage ? [imagePlaceholder(`Question ${q.number}`)] : [];"+qbody[m.start():]
+              # Add block to the first children array after the question text.\n              qbody=qbody.replace("textParagraph(q.textEn", "...sourceImageBlock, textParagraph(q.textEn", 1)
+              s=s[:qstart]+qbody+s[qend:]
+
+          # Current source PDF check: Q15 option 3 is 5. Apply only to the exact question wording, never globally.\n          s=s.replace("if (Number(q.number) === 15 && /A1\\/2 B1\\/3/i.test(q.textEn) && q.optionsEn?.[2] === '3') q.optionsEn[2] = '5';", "")
+          marker2="async function questionTable"
+          qa="""function applySourceSpecificQA(q:any):void {\n  if(Number(q?.number)===15 && /Physical quantity is given as Y/i.test(String(q?.textEn||'')) && Array.isArray(q.optionsEn) && q.optionsEn.length>=4 && String(q.optionsEn[2]).trim()==='3') q.optionsEn[2]='5';\n}\n"""
+          if 'function applySourceSpecificQA' not in s:
+              s=s.replace(marker2,qa+marker2,1)
+              s=s.replace("const sourceImage = needsSourceImage(q);", "applySourceSpecificQA(q);\n  const sourceImage = needsSourceImage(q);",1)
+
+          p.write_text(s,encoding='utf-8')
+          print('patched', p)
+
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add server/docx-generator.ts
+          git diff --cached --quiet && exit 0
+          git commit -m "Fix DOCX source placeholders and math cleanup [docx-patch]"
+          git push
