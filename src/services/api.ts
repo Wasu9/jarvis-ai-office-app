@@ -14,7 +14,31 @@ function rawQuestionsFromTask(task:TaskRecord):any[]{try{const parsed=JSON.parse
 function dispatchLiveStep(step:TaskStep){if(typeof window!=='undefined')window.dispatchEvent(new CustomEvent<TaskStep>('jarvis-task-step',{detail:step}));}
 function sleep(ms:number){return new Promise(resolve=>setTimeout(resolve,ms));}
 async function askRecoveryBrain(objective:string,progress:string,error:string):Promise<{decision:'retry'|'resume'|'pause';reason:string}>{try{const res=await fetch('/api/brain/recover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({objective,progress,error})});const data=await res.json().catch(()=>({}));if(data?.decision==='pause')return{decision:'pause',reason:String(data.reason||'Recovery brain requested a pause.')};if(data?.decision==='resume')return{decision:'resume',reason:String(data.reason||'Resume from the latest checkpoint.')};return{decision:'retry',reason:String(data.reason||'Transient failure; retrying the current checkpoint.')};}catch{return{decision:'retry',reason:'Recovery brain was unavailable; retrying the current checkpoint.'};}}
-async function detectSourceQuestionCount(params:TaskRequest):Promise<number>{const res=await fetch('/api/tasks/source-count',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({attachedFiles:params.attachedFiles||[],model:params.model||'gemini-3.7-flash'})});const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(String(data?.error||'JARVIS could not determine how many questions are actually in the uploaded PDF.'));const count=Number(data?.questionCount);if(!Number.isInteger(count)||count<1)throw new Error('JARVIS could not determine a valid question count from the uploaded PDF. No default question count will be assumed.');return count;}
+
+async function detectSourceQuestionCount(params:TaskRequest):Promise<number>{
+  const body=JSON.stringify({attachedFiles:params.attachedFiles||[],model:params.model||'gemini-3.7-flash'});
+  let lastError='JARVIS could not determine how many questions are actually in the uploaded PDF.';
+  for(let attempt=1;attempt<=3;attempt++){
+    try{
+      const res=await fetch('/api/tasks/source-count',{method:'POST',headers:{'Content-Type':'application/json'},body});
+      const data=await res.json().catch(()=>({}));
+      if(res.ok){
+        const count=Number(data?.questionCount);
+        if(Number.isInteger(count)&&count>=1)return count;
+        lastError='JARVIS could not determine a valid question count from the uploaded PDF. No default question count will be assumed.';
+        break;
+      }
+      lastError=String(data?.error||`Source question-count service returned HTTP ${res.status}.`);
+      // Retry transient server/rate-limit failures, but do not hide a deterministic
+      // unresolved-document result behind three identical requests.
+      if(res.status===422||res.status===400)break;
+    }catch(error){
+      lastError=error instanceof Error?error.message:'Source question-count request failed.';
+    }
+    if(attempt<3)await sleep(attempt===1?800:1800);
+  }
+  throw new Error(lastError);
+}
 
 export class ApiService{
   static async checkHealth(){return await (await fetch('/api/health')).json();}
@@ -47,8 +71,6 @@ export class ApiService{
     dispatchLiveStep({status:'generating',label:`SOURCE PLAN · ${total} questions · chunked execution`,timestamp:new Date().toISOString(),details:`Source count is locked at ${total}; no 180-question fallback exists.`});
     for(let start=startFrom;start<=total;start+=chunkSize){
       const end=Math.min(start+chunkSize-1,total);
-      // IMPORTANT: the total is deliberately the first/only question-count phrase in this prompt.
-      // The server receives the real source total separately; the range is metadata, not the total.
       const chunkPrompt=`${params.userPrompt} Process exactly ${total} questions from the attached source. CURRENT CHUNK ONLY: extract Q.${start}–Q.${end}. Do not process questions outside this range.`;
       dispatchLiveStep({status:'generating',label:`SOURCE CHUNK · Q.${start}–Q.${end}`,timestamp:new Date().toISOString(),details:`Overall mission: ${completed}/${total} captured. Processing this range independently.`});
       let chunkTask:TaskRecord|null=null;let lastError='';
