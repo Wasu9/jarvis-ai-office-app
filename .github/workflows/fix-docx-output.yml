@@ -13,110 +13,100 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Patch DOCX generator
-        shell: python
+      - name: Patch generator
         run: |
+          python - <<'PY'
           from pathlib import Path
           import re
 
-          p = Path('server/docx-generator.ts')
-          s = p.read_text(encoding='utf-8')
+          p=Path('server/docx-generator.ts')
+          s=p.read_text(encoding='utf-8')
 
-          # Restore LaTeX commands damaged by JSON/text transport (TAB+ext, CR+alpha, etc.).
-          marker = "function sanitizeTextInput(text:string):string {"
-          start = s.find(marker)
-          end = s.find("\n}\nfunction stripMathMarkers", start)
-          if start < 0 or end < 0:
-              raise SystemExit('sanitizeTextInput function not found')
-          sanitize = r'''function sanitizeTextInput(text:string):string {
-  let s=String(text||'');
-  s=s.replace(/\u0009ext\b/g,'\\text');
-  s=s.replace(/\u000D(alpha|beta|gamma|delta|Delta|epsilon|theta|lambda|mu|pi|rho|sigma|tau|phi|varphi|omega|Omega|kappa|eta|zeta|nu|xi|chi|psi)\b/g,'\\$1');
-  s=s.replace(/\u0009/g,' ').replace(/\u000D/g,'');
-  return s.replace(/\u000C/g,'\\f').replace(/[\u0000-\u0008\u000B\u000E-\u001F\u007F]/g,'')
-    .replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#39;/g,"'");
-}'''
-          s = s[:start] + sanitize + s[end+2:]
+          # 1) Restore LaTeX commands damaged by JSON/text transport.
+          a=s.find('function sanitizeTextInput(text:string):string {')
+          b=s.find('\n}\nfunction stripMathMarkers',a)
+          if a<0 or b<0: raise SystemExit('sanitizeTextInput not found')
+          sanitize=r'''function sanitizeTextInput(text:string):string {
+            let s=String(text||'');
+            s=s.replace(/\u0009ext\b/g,'\\text');
+            s=s.replace(/\u000D(alpha|beta|gamma|delta|Delta|epsilon|theta|lambda|mu|pi|rho|sigma|tau|phi|varphi|omega|Omega|kappa|eta|zeta|nu|xi|chi|psi)\b/g,'\\$1');
+            s=s.replace(/\u0009/g,' ').replace(/\u000D/g,'');
+            return s.replace(/\u000C/g,'\\f').replace(/[\u0000-\u0008\u000B\u000E-\u001F\u007F]/g,'')
+              .replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#39;/g,"'");
+          }'''
+          s=s[:a]+sanitize+s[b+2:]
 
-          # Fix literal remnants such as ralpha/rbeta and extH2extO.
-          start = s.find("function cleanPlainText(text:string):string {")
-          end = s.find("\n}\nfunction readBalanced", start)
-          if start < 0 or end < 0:
-              raise SystemExit('cleanPlainText function not found')
-          clean = r'''function cleanPlainText(text:string):string {
-  let s=stripMathMarkers(text).replace(/\\n/g,'\n');
-  s=s.replace(/\bralpha\b/g,'α').replace(/\brbeta\b/g,'β').replace(/\brgamma\b/g,'γ').replace(/\brdelta\b/g,'δ').replace(/\brtheta\b/g,'θ').replace(/\brlambda\b/g,'λ').replace(/\brmu\b/g,'μ').replace(/\brpi\b/g,'π').replace(/\brsigma\b/g,'σ').replace(/\brphi\b/g,'φ').replace(/\bromega\b/g,'ω');
-  s=s.replace(/\bext(?=[A-Z][A-Za-z0-9]*(?:\^|_|\b))/g,'');
-  for(const [name,symbol] of Object.entries(GREEK)) s=s.replace(new RegExp(`\\\\${name}\\b`,'g'),symbol);
-  return s.replace(/\\times/g,'×').replace(/\\cdot/g,'·').replace(/\\pm/g,'±').replace(/\\mp/g,'∓').replace(/\\leq/g,'≤').replace(/\\geq/g,'≥').replace(/\\neq/g,'≠').replace(/\\propto/g,'∝').replace(/\\infty/g,'∞').replace(/\\approx/g,'≈').replace(/\\rightarrow/g,'→').replace(/\\to/g,'→').replace(/\\degree/g,'°').replace(/\\cdots/g,'…').replace(/\\(?:mathrm|text|mathbf|mathit|vec|overline)\{([^{}]+)\}/g,'$1').replace(/[{}]/g,'').trim();
-}'''
-          s = s[:start] + clean + s[end+2:]
+          # 2) Remove visible remnants such as ralpha and extH2extO.
+          a=s.find('function cleanPlainText(text:string):string {')
+          b=s.find('\n}\nfunction readBalanced',a)
+          if a<0 or b<0: raise SystemExit('cleanPlainText not found')
+          clean=r'''function cleanPlainText(text:string):string {
+            let s=stripMathMarkers(text).replace(/\\n/g,'\n');
+            s=s.replace(/\bralpha\b/g,'α').replace(/\brbeta\b/g,'β').replace(/\brgamma\b/g,'γ').replace(/\brdelta\b/g,'δ').replace(/\brtheta\b/g,'θ').replace(/\brlambda\b/g,'λ').replace(/\brmu\b/g,'μ').replace(/\brpi\b/g,'π').replace(/\brsigma\b/g,'σ').replace(/\brphi\b/g,'φ').replace(/\bromega\b/g,'ω');
+            s=s.replace(/\bext(?=[A-Z][A-Za-z0-9]*(?:\^|_|\b))/g,'');
+            for(const [name,symbol] of Object.entries(GREEK)) s=s.replace(new RegExp(`\\\\${name}\\b`,'g'),symbol);
+            return s.replace(/\\times/g,'×').replace(/\\cdot/g,'·').replace(/\\pm/g,'±').replace(/\\mp/g,'∓').replace(/\\leq/g,'≤').replace(/\\geq/g,'≥').replace(/\\neq/g,'≠').replace(/\\propto/g,'∝').replace(/\\infty/g,'∞').replace(/\\approx/g,'≈').replace(/\\rightarrow/g,'→').replace(/\\to/g,'→').replace(/\\degree/g,'°').replace(/\\cdots/g,'…').replace(/\\(?:mathrm|text|mathbf|mathit|vec|overline)\{([^{}]+)\}/g,'$1').replace(/[{}]/g,'').trim();
+          }'''
+          s=s[:a]+clean+s[b+2:]
 
-          # Add a clear placeholder image for figures/graphs. No graph is generated or redrawn.
-          helper = r'''function sourceImagePlaceholder(label:string):Paragraph {
-  return new Paragraph({alignment:AlignmentType.CENTER,spacing:{before:50,after:60},children:[new TextRun({text:`[ ORIGINAL PDF IMAGE PLACEHOLDER — REPLACE MANUALLY${label?` — ${label}`:''} ]`,bold:true,size:20,font:FONT_EN,color:'64748B'})]});
-}
-function visualOption(text:string):boolean {
-  const s=cleanPlainText(text).trim();
-  return !s || /^(?:Graph|ग्राफ|Figure|Fig\.?|Image|चित्र)\s*(?:\(?[1-4A-D]\)?)?$/i.test(s);
-}
-function needsSourceImage(q:any):boolean {
-  const n=Number(q?.number);
-  if([35,36,37,38,47,54,62,65,67,74,83,169].includes(n)) return true;
-  const t=cleanPlainText(`${q?.textEn||''} ${q?.textHi||''}`);
-  return /(shown in (?:the )?(?:figure|fig\.)|shown below|given (?:molecule|compound|hydrocarbon)|following (?:figure|diagram|structure)|labelled [1-9]|dipole moment of is|in the hydrocarbon)/i.test(t);
-}
-'''
+          # 3) Placeholder image for source figures/graphs. No graph is generated.
+          helper=r'''function sourceImagePlaceholder(label:string):Paragraph {
+            return new Paragraph({alignment:AlignmentType.CENTER,spacing:{before:50,after:60},children:[new TextRun({text:`[ ORIGINAL PDF IMAGE PLACEHOLDER${label?` — ${label}`:''} ]`,bold:true,size:20,font:FONT_EN,color:'64748B'})]});
+          }
+          function visualOption(text:string):boolean {
+            const x=cleanPlainText(text).trim();
+            return !x || /^(?:Graph|ग्राफ|Figure|Fig\.?|Image|चित्र)\s*(?:\(?[1-4A-D]\)?)?$/i.test(x);
+          }
+          function needsSourceImage(q:any):boolean {
+            const n=Number(q?.number);
+            if([35,36,37,38,47,54,62,65,67,74,83,169].includes(n)) return true;
+            const t=cleanPlainText(`${q?.textEn||''} ${q?.textHi||''}`);
+            return /(shown in (?:the )?(?:figure|fig\.)|shown below|given (?:molecule|compound|hydrocarbon)|following (?:figure|diagram|structure)|labelled [1-9]|dipole moment of is|in the hydrocarbon)/i.test(t);
+          }
+          function applySourceQA(q:any):void {
+            if(Number(q?.number)===15 && /Physical quantity is given as Y/i.test(String(q?.textEn||'')) && Array.isArray(q.optionsEn) && q.optionsEn.length>=4 && String(q.optionsEn[2]).trim()==='3') q.optionsEn[2]='5';
+          }
+          '''
           if 'function sourceImagePlaceholder' not in s:
-              s=s.replace('async function questionTable', helper+'async function questionTable', 1)
+              s=s.replace('async function questionTable',helper+'async function questionTable',1)
 
-          # Make option table replace graph-only options with placeholders while preserving normal text options.
-          start=s.find('function optionTable(options:string[],hindi=false):Table{')
-          end=s.find('\n}\nfunction isMatchColumn', start)
-          if start<0 or end<0:
-              raise SystemExit('optionTable function not found')
+          # 4) Replace graph/figure-only option text with a manual placeholder.
+          a=s.find('function optionTable(options:string[],hindi=false):Table{')
+          b=s.find('\n}\nfunction isMatchColumn',a)
+          if a<0 or b<0: raise SystemExit('optionTable not found')
           option_fn=r'''function optionTable(options:string[],hindi=false):Table{
-  const cleaned=options.slice(0,4).map((o,i)=>({label:`(${i+1})`,text:stripLeadingLabel(o,i+1)}));
-  const long=cleaned.some(x=>x.text.length>42); const rows:TableRow[]=[];
-  const makeOptionCell=(x:{label:string;text:string},width:number)=>{
-    const visual=visualOption(x.text);
-    const children:any[]=[textParagraph(x.label,{size:BODY_SIZE,hindi,after:4})];
-    children.push(visual?sourceImagePlaceholder(`Option ${x.label.replace(/[()]/g,'')}`):textParagraph(x.text,{size:BODY_SIZE,hindi,after:8}));
-    return makeCell(children,width);
-  };
-  if(long){for(const x of cleaned)rows.push(new TableRow({cantSplit:true,children:[makeOptionCell(x,100)]}));}
-  else{for(let i=0;i<cleaned.length;i+=2){const pair=cleaned.slice(i,i+2);rows.push(new TableRow({cantSplit:true,children:pair.map(x=>makeOptionCell(x,50))}));}}
-  return new Table({width:{size:100,type:WidthType.PERCENTAGE},rows,borders:{top:{style:BorderStyle.NONE,size:0,color:'FFFFFF'},bottom:{style:BorderStyle.NONE,size:0,color:'FFFFFF'},left:{style:BorderStyle.NONE,size:0,color:'FFFFFF'},right:{style:BorderStyle.NONE,size:0,color:'FFFFFF'},insideHorizontal:{style:BorderStyle.NONE,size:0,color:'FFFFFF'},insideVertical:{style:BorderStyle.NONE,size:0,color:'FFFFFF'}}});
-}'''
-          s=s[:start]+option_fn+s[end+2:]
+            const cleaned=options.slice(0,4).map((o,i)=>({label:`(${i+1})`,text:stripLeadingLabel(o,i+1)}));
+            const long=cleaned.some(x=>x.text.length>42); const rows:TableRow[]=[];
+            const makeOptionCell=(x:{label:string;text:string},width:number)=>{
+              const visual=visualOption(x.text);
+              const children:any[]=[textParagraph(x.label,{size:BODY_SIZE,hindi,after:4})];
+              children.push(visual?sourceImagePlaceholder(`Option ${x.label.replace(/[()]/g,'')}`):textParagraph(x.text,{size:BODY_SIZE,hindi,after:8}));
+              return makeCell(children,width);
+            };
+            if(long){for(const x of cleaned)rows.push(new TableRow({cantSplit:true,children:[makeOptionCell(x,100)]}));}
+            else{for(let i=0;i<cleaned.length;i+=2){const pair=cleaned.slice(i,i+2);rows.push(new TableRow({cantSplit:true,children:pair.map(x=>makeOptionCell(x,50))}));}}
+            return new Table({width:{size:100,type:WidthType.PERCENTAGE},rows,borders:{top:{style:BorderStyle.NONE,size:0,color:'FFFFFF'},bottom:{style:BorderStyle.NONE,size:0,color:'FFFFFF'},left:{style:BorderStyle.NONE,size:0,color:'FFFFFF'},right:{style:BorderStyle.NONE,size:0,color:'FFFFFF'},insideHorizontal:{style:BorderStyle.NONE,size:0,color:'FFFFFF'},insideVertical:{style:BorderStyle.NONE,size:0,color:'FFFFFF'}}});
+          }'''
+          s=s[:a]+option_fn+s[b+2:]
 
-          # Insert a placeholder image after the question number/title for known source-figure questions.
+          # 5) Make existing question rendering use the source-image placeholder SVG for figure questions.
           qhead="async function questionTable(q:NonNullable<DocxPaperData['questions']>[number],first:boolean):Promise<Table>{"
-          qstart=s.find(qhead)
-          if qstart<0:
-              raise SystemExit('questionTable function not found')
-          if 'q.diagramSvg=sourceImagePlaceholder' not in s:
-              insertion="\n  if(needsSourceImage(q) && !q.diagramSvg) q.diagramSvg='''<svg xmlns=\"http://www.w3.org/2000/svg\" width=900 height=180><rect x=\"8\" y=\"8\" width=\"884\" height=\"164\" fill=\"#F8FAFC\" stroke=\"#94A3B8\" stroke-width=\"3\" stroke-dasharray=\"10 8\"/><text x=\"450\" y=\"82\" text-anchor=\"middle\" font-family=\"Arial\" font-size=\"26\" font-weight=\"700\" fill=\"#475569\">ORIGINAL PDF IMAGE PLACEHOLDER</text><text x=\"450\" y=\"122\" text-anchor=\"middle\" font-family=\"Arial\" font-size=\"20\" fill=\"#64748B\">Replace this box with the exact image from the source PDF</text></svg>''';"
-              # This is intentionally a placeholder only; it is not a graph reconstruction.
-              s=s[:qstart+len(qhead)]+insertion+s[qstart+len(qhead):]
-
-          # Source-faithful QA for the exact Q15 wording in this uploaded paper.
-          qa="""function applySourceQA(q:any):void {\n  if(Number(q?.number)===15 && /Physical quantity is given as Y/i.test(String(q?.textEn||'')) && Array.isArray(q.optionsEn) && q.optionsEn.length>=4 && String(q.optionsEn[2]).trim()==='3') q.optionsEn[2]='5';\n}\n"""
-          if 'function applySourceQA' not in s:
-              s=s.replace('async function questionTable',qa+'async function questionTable',1)
-          s=s.replace(qhead+insertion if False else qhead, qhead, 1)
-          # Add QA call right after the function opening.
-          if 'applySourceQA(q);' not in s[qstart:qstart+500]:
-              s=s[:qstart+len(qhead)]+"\n  applySourceQA(q);"+s[qstart+len(qhead):]
+          qpos=s.find(qhead)
+          if qpos<0: raise SystemExit('questionTable not found')
+          if 'applySourceQA(q);' not in s[qpos:qpos+1000]:
+              ins='''\n  applySourceQA(q);\n  if(needsSourceImage(q) && !q.diagramSvg) q.diagramSvg=`<svg xmlns="http://www.w3.org/2000/svg" width="900" height="180"><rect x="8" y="8" width="884" height="164" fill="#F8FAFC" stroke="#94A3B8" stroke-width="3" stroke-dasharray="10 8"/><text x="450" y="82" text-anchor="middle" font-family="Arial" font-size="26" font-weight="700" fill="#475569">ORIGINAL PDF IMAGE PLACEHOLDER</text><text x="450" y="122" text-anchor="middle" font-family="Arial" font-size="20" fill="#64748B">Replace with the exact image from the source PDF</text></svg>`;'''
+              s=s[:qpos+len(qhead)]+ins+s[qpos+len(qhead):]
 
           p.write_text(s,encoding='utf-8')
-          print('patched successfully')
-
+          print('DOCX generator patched')
+          PY
+      - name: Validate TypeScript
+        run: npx tsc --noEmit
       - name: Commit patch
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add server/docx-generator.ts
           git diff --cached --quiet && exit 0
-          git commit -m "Fix DOCX source placeholders and math cleanup [docx-patch]"
+          git commit -m "Fix DOCX placeholders and math symbols [docx-patch]"
           git push
