@@ -3,9 +3,7 @@ import { convertFileToMarkdown } from '../../server/document-markdown.js';
 import { extractText, getDocumentProxy } from 'unpdf';
 
 export const config = {
-  api: {
-    bodyParser: { sizeLimit: '50mb' },
-  },
+  api: { bodyParser: { sizeLimit: '50mb' } },
 };
 
 const COUNT_SCHEMA = {
@@ -18,7 +16,6 @@ const COUNT_SCHEMA = {
 };
 
 type CountResult = { questionCount: number; lastQuestionNumber: number };
-
 type InlineFile = { mimeType: string; data: string; name?: string; textPreview?: string };
 
 function stripDataUrl(value: string): string {
@@ -38,27 +35,77 @@ function extractJson(text: string): any {
   try { return JSON.parse(cleaned); } catch {}
   const a = cleaned.indexOf('{');
   const b = cleaned.lastIndexOf('}');
-  if (a >= 0 && b > a) return JSON.parse(cleaned.slice(a, b + 1));
+  if (a >= 0 && b > a) {
+    try { return JSON.parse(cleaned.slice(a, b + 1)); } catch {}
+  }
   throw new Error('JARVIS could not read the source question count.');
+}
+
+function validCount(count: number, last: number): CountResult | null {
+  if (!Number.isInteger(count) || count < 1 || count > 1000) return null;
+  if (!Number.isInteger(last) || last < 1 || last > 1000) return null;
+  return { questionCount: count, lastQuestionNumber: last };
 }
 
 function parseCountText(text: string): CountResult | null {
   const normalized = normalizeText(text);
   const jsonMatch = normalized.match(/\{[\s\S]{0,500}?"questionCount"\s*:\s*(\d{1,4})[\s\S]{0,300}?"lastQuestionNumber"\s*:\s*(\d{1,4})[\s\S]{0,100}?\}/i);
   if (jsonMatch) {
-    const count = Number(jsonMatch[1]);
-    const last = Number(jsonMatch[2]);
-    if (Number.isInteger(count) && count >= 1 && count <= 1000 && Number.isInteger(last) && last >= 1 && last <= 1000) return { questionCount: count, lastQuestionNumber: last };
+    const parsed = validCount(Number(jsonMatch[1]), Number(jsonMatch[2]));
+    if (parsed) return parsed;
   }
-  const countMatch = normalized.match(/(?:question\s*count|total\s*questions?|number\s*of\s*questions?)\s*[:=\-]?\s*(\d{1,4})/i);
+
+  const rangePatterns = [
+    /(?:questions?|प्रश्न)\s*(?:number|nos?\.?|from)?\s*(\d{1,4})\s*(?:to|through|–|—|-)\s*(\d{1,4})/i,
+    /(?:\bQ(?:uestion)?\s*\.?\s*)?(\d{1,4})\s*(?:to|through|–|—|-)\s*(\d{1,4})\s*(?:questions?|प्रश्न)/i,
+  ];
+  for (const re of rangePatterns) {
+    const m = normalized.match(re);
+    if (m) {
+      const start = Number(m[1]);
+      const end = Number(m[2]);
+      if (start === 1 && end >= 1) return validCount(end, end);
+    }
+  }
+
+  const countMatch = normalized.match(/(?:question\s*count|total\s*(?:number\s*of\s*)?questions?|number\s*of\s*questions?)\s*[:=\-]?\s*(\d{1,4})/i);
   const lastMatch = normalized.match(/(?:last\s*question(?:\s*number)?|final\s*question(?:\s*number)?|last\s*(?:printed\s*)?number)\s*[:=\-]?\s*(\d{1,4})/i);
   const count = countMatch ? Number(countMatch[1]) : 0;
   const last = lastMatch ? Number(lastMatch[1]) : count;
-  if (Number.isInteger(count) && count >= 1 && count <= 1000 && Number.isInteger(last) && last >= 1 && last <= 1000) return { questionCount: count, lastQuestionNumber: last };
-  return null;
+  return validCount(count, last);
 }
 
-/** Prefer explicit section ranges printed by the source PDF. */
+/**
+ * Count the longest contiguous question-number sequence beginning at Q1.
+ * This intentionally works without line anchors because PDF extractors often
+ * flatten an entire page into one long line.
+ */
+function detectCountFromQuestionSequence(text: string): CountResult | null {
+  const normalized = normalizeText(text);
+  const candidates = new Set<number>();
+  const patterns = [
+    /\bQ(?:uestion)?\s*\.?\s*(\d{1,4})\s*[.)\-:]?/gi,
+    /\bQuestion\s*(?:No\.?\s*)?(\d{1,4})\s*[.)\-:]?/gi,
+    /(?:^|\s)(\d{1,4})\s*[.)\-:]\s+/gm,
+  ];
+  for (const pattern of patterns) {
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(normalized)) !== null) {
+      const n = Number(match[1]);
+      if (Number.isInteger(n) && n >= 1 && n <= 1000) candidates.add(n);
+    }
+  }
+  if (!candidates.has(1)) return null;
+
+  let last = 0;
+  for (let n = 1; n <= 1000; n += 1) {
+    if (!candidates.has(n)) break;
+    last = n;
+  }
+  return last > 0 ? { questionCount: last, lastQuestionNumber: last } : null;
+}
+
+/** Prefer explicit source ranges, then the actual printed question sequence. */
 function detectCountFromSectionRanges(text: string): CountResult | null {
   const normalized = normalizeText(text);
   const ranges: Array<{ start: number; end: number; count: number }> = [];
@@ -90,35 +137,11 @@ function detectCountFromSectionRanges(text: string): CountResult | null {
   return last > 0 ? { questionCount: last, lastQuestionNumber: last } : null;
 }
 
-function detectCountFromQuestionSequence(text: string): CountResult | null {
-  const normalized = normalizeText(text);
-  const candidates = new Set<number>();
-  const patterns = [
-    /^\s*(\d{1,3})\s*[.)]\s+\S/gm,
-    /^\s*Q\.?\s*(\d{1,3})\s*[.)\-:]\s*\S/gim,
-    /^\s*Question\s*(\d{1,3})\s*[.)\-:]\s*\S/gim,
-  ];
-  for (const pattern of patterns) {
-    let match: RegExpExecArray | null;
-    while ((match = pattern.exec(normalized)) !== null) {
-      const n = Number(match[1]);
-      if (Number.isInteger(n) && n >= 1 && n <= 1000) candidates.add(n);
-    }
-  }
-  if (!candidates.has(1)) return null;
-  let last = 0;
-  for (let n = 1; n <= 1000; n += 1) {
-    if (!candidates.has(n)) break;
-    last = n;
-  }
-  return last > 0 ? { questionCount: last, lastQuestionNumber: last } : null;
-}
-
 async function enrichForCount(files: any[]): Promise<InlineFile[]> {
   return Promise.all(files.map(async (file: any) => {
     const base: InlineFile = {
       mimeType: file.type || 'application/pdf',
-      data: stripDataUrl(file.base64Data),
+      data: stripDataUrl(file.base64Data || ''),
       name: file.name,
       textPreview: typeof file.textPreview === 'string' ? file.textPreview : undefined,
     };
@@ -137,12 +160,13 @@ async function extractDeterministicText(inline: InlineFile[]): Promise<string> {
   const parts: string[] = [];
   for (const file of inline) {
     if (file.textPreview?.trim()) parts.push(file.textPreview.trim());
-    if (String(file.mimeType).toLowerCase().includes('pdf')) {
+    if (String(file.mimeType).toLowerCase().includes('pdf') && file.data) {
       try {
         const bytes = new Uint8Array(Buffer.from(file.data, 'base64'));
         const pdf = await getDocumentProxy(bytes);
-        const result = await extractText(pdf, { mergePages: true });
-        if (result.text?.trim()) parts.push(String(result.text).trim());
+        const result = await extractText(pdf, { mergePages: false });
+        if (Array.isArray(result.text)) parts.push(result.text.map(String).join('\n'));
+        else if (result.text?.trim()) parts.push(String(result.text).trim());
       } catch (error) {
         console.warn('[Source Count] unpdf text extraction failed:', error);
       }
@@ -153,45 +177,44 @@ async function extractDeterministicText(inline: InlineFile[]): Promise<string> {
 
 async function askCountFromText(provider: any, extractedText: string, model: string): Promise<CountResult | null> {
   if (!extractedText.trim()) return null;
-  const textForAI = extractedText.length > 100_000
-    ? `${extractedText.slice(0, 50_000)}\n\n[...middle omitted...]\n\n${extractedText.slice(-50_000)}`
+  const textForAI = extractedText.length > 180_000
+    ? `${extractedText.slice(0, 90_000)}\n\n[...middle omitted...]\n\n${extractedText.slice(-90_000)}`
     : extractedText;
   try {
-    // Text-only first: this avoids sending a large PDF and a large Markdown
-    // companion in the same request and is the most reliable path for text PDFs.
     const raw = await provider.generateText(
-      `Count the ACTUAL numbered questions in the source text below. Do not use any exam default. Verify that numbering begins at 1 and identify the final numbered question. Return ONLY JSON in this exact shape: {"questionCount": number, "lastQuestionNumber": number}.\n\nSOURCE TEXT:\n${textForAI}`,
+      `Determine the ACTUAL number of numbered questions in the source text below. The document may contain MCQ option numbers, page numbers, section numbers and marks; ignore those. Find the real question sequence beginning at Q1 and identify the final question number. Do not assume 180 or any exam default. Return ONLY JSON: {"questionCount": number, "lastQuestionNumber": number}.\n\nSOURCE TEXT:\n${textForAI}`,
       { model, responseMimeType: 'application/json', responseSchema: COUNT_SCHEMA, inlineFiles: [] },
     );
     try {
       const data = extractJson(raw);
-      const count = Number(data?.questionCount);
-      const last = Number(data?.lastQuestionNumber);
-      if (Number.isInteger(count) && count >= 1 && count <= 1000 && Number.isInteger(last) && last >= 1 && last <= 1000) return { questionCount: count, lastQuestionNumber: last };
+      const parsed = validCount(Number(data?.questionCount), Number(data?.lastQuestionNumber));
+      if (parsed) return parsed;
     } catch {}
     return parseCountText(raw);
   } catch (error) {
-    console.warn('[Source Count] text-only Gemini count failed; trying visual fallback:', error);
+    console.warn('[Source Count] text-only Gemini count failed:', error);
     return null;
   }
 }
 
 async function askCountFromVision(provider: any, inline: InlineFile[], model: string): Promise<CountResult | null> {
+  const visualFiles = inline.filter(f => f.data && f.mimeType.toLowerCase().includes('pdf'));
+  if (!visualFiles.length) return null;
   try {
     const raw = await provider.generateText(
-      'Inspect the attached original source document visually and determine the ACTUAL number of numbered questions. Count only questions really present. Never assume 180 or any exam default. Verify the sequence begins at question 1 and identify the final printed question number. Return ONLY JSON: {"questionCount": number, "lastQuestionNumber": number}.',
+      'Inspect the attached original PDF visually. Determine the ACTUAL final printed question number and total number of real numbered questions. Ignore option labels, page numbers, section numbers and marks. Verify the sequence starts at Q1. Never assume 180. Return ONLY JSON: {"questionCount": number, "lastQuestionNumber": number}.',
       {
         model,
         responseMimeType: 'application/json',
         responseSchema: COUNT_SCHEMA,
-        inlineFiles: inline.map(f => ({ mimeType: f.mimeType, data: f.data })),
+        inlineFiles: visualFiles.map(f => ({ mimeType: f.mimeType, data: f.data })),
+        skipDocumentContext: true,
       },
     );
     try {
       const data = extractJson(raw);
-      const count = Number(data?.questionCount);
-      const last = Number(data?.lastQuestionNumber);
-      if (Number.isInteger(count) && count >= 1 && count <= 1000 && Number.isInteger(last) && last >= 1 && last <= 1000) return { questionCount: count, lastQuestionNumber: last };
+      const parsed = validCount(Number(data?.questionCount), Number(data?.lastQuestionNumber));
+      if (parsed) return parsed;
     } catch {}
     return parseCountText(raw);
   } catch (error) {
@@ -210,8 +233,12 @@ export default async function handler(req: any, res: any) {
     const files = Array.isArray(req.body?.attachedFiles) ? req.body.attachedFiles : [];
     if (!files.length) return res.status(400).json({ error: 'No readable source file was attached.' });
 
-    const inline = await enrichForCount(files.filter((f: any) => !!f?.base64Data));
-    if (!inline.length) return res.status(400).json({ error: 'No readable source file was attached.' });
+    // Do not discard textPreview-only attachments. Some browser/library flows
+    // intentionally omit the raw bytes after creating a text representation.
+    const inline = await enrichForCount(files);
+    if (!inline.some(f => f.data || f.textPreview?.trim())) {
+      return res.status(400).json({ error: 'The uploaded source contains neither readable text nor file bytes.' });
+    }
 
     const extractedText = await extractDeterministicText(inline);
     const bySections = detectCountFromSectionRanges(extractedText);
@@ -223,9 +250,6 @@ export default async function handler(req: any, res: any) {
     const provider = aiRegistry.getProvider('gemini');
     const model = req.body?.model || 'gemini-3.7-flash';
 
-    // IMPORTANT: text-only Gemini is attempted before visual Gemini. This
-    // prevents a large inline PDF from being combined with MarkItDown text
-    // during the count step, which was causing the generic count failure.
     const fromText = await askCountFromText(provider, extractedText, model);
     if (fromText) return res.status(200).json({ ...fromText, detectionMethod: 'gemini-text-fallback' });
 
@@ -233,7 +257,7 @@ export default async function handler(req: any, res: any) {
     if (fromVision) return res.status(200).json({ ...fromVision, detectionMethod: 'gemini-visual-fallback' });
 
     return res.status(422).json({
-      error: 'JARVIS could not determine the source question count. The PDF was received, but neither deterministic extraction nor Gemini could verify the final question number. Please retry with the original PDF file.',
+      error: 'JARVIS could not verify the source question count after checking the extracted document text and the original PDF. The document was received, but the final question number could not be proven safely.',
       code: 'SOURCE_COUNT_UNRESOLVED',
     });
   } catch (err: any) {
