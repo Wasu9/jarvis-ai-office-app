@@ -22,6 +22,7 @@
     "html2canvas": "^1.4.1",
     "jspdf": "^4.2.1",
     "lucide-react": "^0.546.0",
+    "markitdown-ts": "^0.0.10",
     "motion": "^12.23.24",
     "unpdf": "^1.8.1",
     "phaser": "^3.90.0",
