@@ -1,5 +1,4 @@
 import { GoogleGenAI } from '@google/genai';
-import { MarkItDown } from 'markitdown-ts';
 
 export interface AICompletionOptions {
   systemInstruction?: string;
@@ -8,7 +7,7 @@ export interface AICompletionOptions {
   responseSchema?: Record<string, any>;
   inlineFiles?: Array<{ mimeType: string; data: string }>;
   model?: string;
-  /** Avoid duplicating a PDF with a large MarkItDown text companion. */
+  /** Avoid duplicating a PDF with a large text companion. */
   skipDocumentContext?: boolean;
 }
 
@@ -18,10 +17,11 @@ export interface AIProvider {
   generateText(prompt: string, options?: AICompletionOptions): Promise<string>;
 }
 
-const DEFAULT_MODEL = 'gemini-3.7-flash';
-const FALLBACK_MODELS = ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite'];
+const DEFAULT_MODEL = 'gemini-3.8-flash';
+const FALLBACK_MODELS = ['gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite'];
 const MARKDOWN_CONTEXT_LIMIT = 160_000;
-const markItDown = new MarkItDown();
+
+type DocumentFile = { mimeType: string; data: string };
 
 function extensionForMime(mimeType: string): string {
   const mime = String(mimeType || '').toLowerCase();
@@ -40,24 +40,38 @@ function stripDataUrl(data: string): string {
   return String(data || '').replace(/^data:[^;]+;base64,/, '');
 }
 
-async function buildDocumentContext(files?: Array<{ mimeType: string; data: string }>): Promise<string> {
+/**
+ * MarkItDown/its PDF renderer has optional native canvas dependencies that are
+ * not guaranteed to exist in Vercel's serverless runtime. Keep the import lazy
+ * so a document-conversion failure can never crash the whole API module.
+ */
+async function buildDocumentContext(files?: DocumentFile[]): Promise<string> {
   if (!files?.length) return '';
-  const sections: string[] = [];
-  for (const file of files) {
-    try {
-      const bytes = Buffer.from(stripDataUrl(file.data), 'base64');
-      const result = await markItDown.convertBuffer(bytes, { file_extension: extensionForMime(file.mimeType) });
-      const markdown = String(result?.markdown || '').trim();
-      if (markdown) sections.push(`DOCUMENT TEXT EXTRACT (${file.mimeType}):\n${markdown.slice(0, MARKDOWN_CONTEXT_LIMIT)}`);
-    } catch (error) {
-      console.warn('[MarkItDown] Document context extraction failed; keeping original inline file.', error);
+  try {
+    const mod: any = await import('markitdown-ts');
+    const MarkItDownCtor = mod.MarkItDown;
+    if (typeof MarkItDownCtor !== 'function') return '';
+    const converter = new MarkItDownCtor();
+    const sections: string[] = [];
+    for (const file of files) {
+      try {
+        const bytes = Buffer.from(stripDataUrl(file.data), 'base64');
+        const result = await converter.convertBuffer(bytes, { file_extension: extensionForMime(file.mimeType) });
+        const markdown = String(result?.markdown || '').trim();
+        if (markdown) sections.push(`DOCUMENT TEXT EXTRACT (${file.mimeType}):\n${markdown.slice(0, MARKDOWN_CONTEXT_LIMIT)}`);
+      } catch (error) {
+        console.warn('[MarkItDown] Document context extraction failed; continuing with original inline file.', error);
+      }
     }
+    return sections.join('\n\n--- DOCUMENT BREAK ---\n\n');
+  } catch (error) {
+    console.warn('[MarkItDown] Optional document converter unavailable in this serverless runtime; using native Gemini document input.', error);
+    return '';
   }
-  return sections.join('\n\n--- DOCUMENT BREAK ---\n\n');
 }
 
 export class GeminiProvider implements AIProvider {
-  name = 'Gemini 3.7 Flash';
+  name = 'Gemini 3.8 Flash';
 
   private getApiKey(): string | undefined {
     const key = process.env.GEMINI_API_KEY;
