@@ -13,6 +13,7 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import re
           p=Path('server/docx-generator.ts')
           s=p.read_text()
           if 'const MATH_SIZE' not in s:
@@ -45,25 +46,21 @@ jobs:
             const safe=String(n).replace(/[^0-9A-Za-z.]/g,'');
             return `<svg xmlns="http://www.w3.org/2000/svg" width="720" height="210"><rect x="6" y="6" width="708" height="198" rx="10" fill="#F8FAFC" stroke="#64748B" stroke-width="3"/><text x="360" y="100" text-anchor="middle" font-family="Arial" font-size="25" fill="#334155">Q.${safe} — ORIGINAL PDF IMAGE PLACEHOLDER</text><text x="360" y="138" text-anchor="middle" font-family="Arial" font-size="17" fill="#64748B">Insert the original source PDF image here</text></svg>`;
           }
-          '' '
+'''
               s=s[:pos]+helper+s[pos:]
-          # Replace the existing diagram rendering block, regardless of prior placeholder patches.
-          qstart=s.index('async function questionTable')
-          qend=s.index('\nfunction appendAnswerKey',qstart)
-          q=s[qstart:qend]
-          q=re.sub(r'\s*const diagram = await renderDiagram\(q\.diagramSvg\);\s*if \(diagram\) \{[^}]*?\}\s*', '\n  if (needsSourceImage(q)) { const ph=await renderDiagram(sourceImagePlaceholderSvg(q.number)); if(ph){ en.push(ph); const hp=await renderDiagram(sourceImagePlaceholderSvg(q.number)); if(hp) hi.push(hp); } } else if (q.diagramSvg?.trim()) { const diagram=await renderDiagram(q.diagramSvg); if(diagram){ en.push(diagram); const hindiDiagram=await renderDiagram(q.diagramSvg); if(hindiDiagram) hi.push(hindiDiagram); } }\n', q, count=1)
-          # If previous code had no const-diagram block, force a placeholder block after the Hindi question paragraph.
-          if 'if (needsSourceImage(q))' not in q:
+          a=s.index('async function questionTable'); b=s.index('\nfunction appendAnswerKey',a); q=s[a:b]
+          old='  const diagram = await renderDiagram(q.diagramSvg);\n  if (diagram) { en.push(diagram); const hindiDiagram = await renderDiagram(q.diagramSvg); if (hindiDiagram) hi.push(hindiDiagram); }'
+          new='  if (needsSourceImage(q)) { const ph=await renderDiagram(sourceImagePlaceholderSvg(q.number)); if(ph){ en.push(ph); const hp=await renderDiagram(sourceImagePlaceholderSvg(q.number)); if(hp) hi.push(hp); } } else if (q.diagramSvg?.trim()) { const diagram=await renderDiagram(q.diagramSvg); if(diagram){ en.push(diagram); const hindiDiagram=await renderDiagram(q.diagramSvg); if(hindiDiagram) hi.push(hindiDiagram); } }'
+          if old in q: q=q.replace(old,new,1)
+          elif 'if (needsSourceImage(q))' not in q:
               needle="  const hi: any[] = [textParagraph(cleanQ(q.textHi || ''), { bold: true, size: QUESTION_SIZE, color: '334155', hindi: true, after: 45, keepNext: true })];"
-              if needle in q:
-                  q=q.replace(needle, needle+"\n  if (needsSourceImage(q)) { const ph=await renderDiagram(sourceImagePlaceholderSvg(q.number)); if(ph){ en.push(ph); const hp=await renderDiagram(sourceImagePlaceholderSvg(q.number)); if(hp) hi.push(hp); } }",1)
-              else:
-                  raise SystemExit('questionTable insertion point not found')
-          s=s[:qstart]+q+s[qend:]
+              if needle in q: q=q.replace(needle,needle+"\n"+new,1)
+              else: raise SystemExit('questionTable insertion point not found')
+          s=s[:a]+q+s[b:]
           p.write_text(s)
           PY
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add server/docx-generator.ts
-          git commit -m 'fix: improve DOCX math typography and source placeholders' || exit 0
+          git commit -m 'fix: improve DOCX math typography and visual placeholders' || exit 0
           git push
