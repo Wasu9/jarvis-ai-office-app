@@ -12,7 +12,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
       - name: Patch renderer
         run: |
           python3 - <<'PY'
@@ -26,30 +25,21 @@ jobs:
           s=s.replace("new MathRun('')", "new MathRun({ text: '', font: FONT_MATH, size: MATH_SIZE })")
           s=s.replace("new MathRun(GREEK[command])", "new MathRun({ text: GREEK[command], font: FONT_MATH, size: MATH_SIZE })")
           s=s.replace("new MathRun(symbols[command])", "new MathRun({ text: symbols[command], font: FONT_MATH, size: MATH_SIZE })")
-
-          a=s.index('function richChildren')
-          b=s.index('\nfunction textParagraph',a)
-          rich='''function richChildren(text: string, options: TextOptions = {}): Array<TextRun | DocxMath> {\n  const source = sanitizeTextInput(String(text || ''));\n  const baseRun = (value: string) => new TextRun({ text: cleanPlainText(value), bold: options.bold, size: options.size ?? BODY_SIZE, font: options.hindi ? FONT_HI : FONT_EN, color: options.color });\n  if (!hasMath(source)) return [baseRun(source)];\n  const output: Array<TextRun | DocxMath> = [];\n  const pattern = /\\[\\[MATH:([\\s\\S]*?)\\]\\]|\\$\\$([\\s\\S]*?)\\$\\$|\\$([^$\\n]+)\\$|\\\\\\(([\\s\\S]*?)\\\\\\)/g;\n  let last=0; let match: RegExpExecArray|null;\n  while((match=pattern.exec(source))){\n    const before=source.slice(last,match.index);\n    if(before) output.push(baseRun(before));\n    if(before && !/\\s$/.test(before)) output.push(baseRun(' '));\n    output.push(mathNode(match[1] ?? match[2] ?? match[3] ?? match[4] ?? ''));\n    const next=source.slice(match.index+match[0].length,match.index+match[0].length+1);\n    if(next && !/\\s|[.,;:!?%)\\]}]/.test(next)) output.push(baseRun(' '));\n    last=match.index+match[0].length;\n  }\n  if(last<source.length) output.push(baseRun(source.slice(last)));\n  return output.length?output:[baseRun('')];\n}\n'''
+          a=s.index('function richChildren'); b=s.index('\nfunction textParagraph',a)
+          rich='''function richChildren(text: string, options: TextOptions = {}): Array<TextRun | DocxMath> {\n  const source=sanitizeTextInput(String(text||''));\n  const baseRun=(value:string)=>new TextRun({text:cleanPlainText(value),bold:options.bold,size:options.size??BODY_SIZE,font:options.hindi?FONT_HI:FONT_EN,color:options.color});\n  if(!hasMath(source)) return [baseRun(source)];\n  const output:Array<TextRun|DocxMath>=[]; const pattern=/\\[\\[MATH:([\\s\\S]*?)\\]\\]|\\$\\$([\\s\\S]*?)\\$\\$|\\$([^$\\n]+)\\$|\\\\\\(([\\s\\S]*?)\\\\\\)/g;\n  let last=0; let match:RegExpExecArray|null;\n  while((match=pattern.exec(source))){ const before=source.slice(last,match.index); if(before) output.push(baseRun(before)); if(before&&!/\\s$/.test(before)) output.push(baseRun(' ')); output.push(mathNode(match[1]??match[2]??match[3]??match[4]??'')); const next=source.slice(match.index+match[0].length,match.index+match[0].length+1); if(next&&!/\\s|[.,;:!?%)\\]}]/.test(next)) output.push(baseRun(' ')); last=match.index+match[0].length; }\n  if(last<source.length) output.push(baseRun(source.slice(last))); return output.length?output:[baseRun('')];\n}\n'''
           s=s[:a]+rich+s[b:]
-
-          marker='async function questionTable'
-          pos=s.index(marker)
-          helpers='''function needsSourceImage(q: NonNullable<DocxPaperData[\'questions\']>[number]): boolean {\n  const n=Number(String(q.number).replace(/^Q\\.?/i,''));\n  if([35,36,37,38,47,54,62,65,67,74,83,169].includes(n)) return true;\n  return /(graph|plot|diagram|figure|fig\\.?|image|shown below|given below|shown in (?:the )?figure|चित्र|ग्राफ|आरेख)/i.test(`${q.textEn||''} ${q.textHi||''}`);\n}\nfunction sourceImagePlaceholderSvg(n: number|string): string {\n  const safe=String(n).replace(/[^0-9A-Za-z.]/g,'');\n  return `<svg xmlns="http://www.w3.org/2000/svg" width="720" height="210"><rect x="6" y="6" width="708" height="198" rx="10" fill="#F8FAFC" stroke="#64748B" stroke-width="3"/><text x="360" y="100" text-anchor="middle" font-family="Arial" font-size="25" fill="#334155">Q.${safe} — ORIGINAL PDF IMAGE PLACEHOLDER</text><text x="360" y="138" text-anchor="middle" font-family="Arial" font-size="17" fill="#64748B">Insert the original source PDF image here</text></svg>`;\n}\n'''
-          s=s[:pos]+helpers+s[pos:]
-
-          # Make graph/figure questions show a placeholder, never an AI-redrawn figure.
-          a=s.index('async function questionTable')
-          b=s.index('\nfunction appendAnswerKey',a)
-          old=s[a:b]
-          old=old.replace('  const diagram = await renderDiagram(q.diagramSvg);\n  if (diagram) { en.push(diagram); const hindiDiagram = await renderDiagram(q.diagramSvg); if (hindiDiagram) hi.push(hindiDiagram); }', '  if (needsSourceImage(q)) { const ph = await renderDiagram(sourceImagePlaceholderSvg(q.number)); if (ph) { en.push(ph); const hp = await renderDiagram(sourceImagePlaceholderSvg(q.number)); if (hp) hi.push(hp); } } else if (q.diagramSvg?.trim()) { const diagram = await renderDiagram(q.diagramSvg); if (diagram) { en.push(diagram); const hindiDiagram = await renderDiagram(q.diagramSvg); if (hindiDiagram) hi.push(hindiDiagram); } }')
-          s=s[:a]+old+s[b:]
+          pos=s.index('async function questionTable')
+          helper='''function needsSourceImage(q: NonNullable<DocxPaperData[\'questions\']>[number]): boolean { const n=Number(String(q.number).replace(/^Q\\.?/i,'')); if([35,36,37,38,47,54,62,65,67,74,83,169].includes(n)) return true; return /(graph|plot|diagram|figure|fig\\.?|image|shown below|given below|shown in (?:the )?figure|चित्र|ग्राफ|आरेख)/i.test(`${q.textEn||''} ${q.textHi||''}`); }\nfunction sourceImagePlaceholderSvg(n: number|string): string { const safe=String(n).replace(/[^0-9A-Za-z.]/g,''); return `<svg xmlns="http://www.w3.org/2000/svg" width="720" height="210"><rect x="6" y="6" width="708" height="198" rx="10" fill="#F8FAFC" stroke="#64748B" stroke-width="3"/><text x="360" y="100" text-anchor="middle" font-family="Arial" font-size="25" fill="#334155">Q.${safe} — ORIGINAL PDF IMAGE PLACEHOLDER</text><text x="360" y="138" text-anchor="middle" font-family="Arial" font-size="17" fill="#64748B">Insert the original source PDF image here</text></svg>`; }\n'''
+          s=s[:pos]+helper+s[pos:]
+          a=s.index('async function questionTable'); b=s.index('\nfunction appendAnswerKey',a); q=s[a:b]
+          q=q.replace('  const diagram = await renderDiagram(q.diagramSvg);\n  if (diagram) { en.push(diagram); const hindiDiagram = await renderDiagram(q.diagramSvg); if (hindiDiagram) hi.push(hindiDiagram); }', '  if (needsSourceImage(q)) { const ph=await renderDiagram(sourceImagePlaceholderSvg(q.number)); if(ph){ en.push(ph); const hp=await renderDiagram(sourceImagePlaceholderSvg(q.number)); if(hp) hi.push(hp); } } else if (q.diagramSvg?.trim()) { const diagram=await renderDiagram(q.diagramSvg); if(diagram){ en.push(diagram); const hindiDiagram=await renderDiagram(q.diagramSvg); if(hindiDiagram) hi.push(hindiDiagram); } }')
+          s=s[:a]+q+s[b:]
           p.write_text(s)
-          print('patched',len(s))
           PY
-          npm ci
+          npm install --no-audit --no-fund
           npm run build
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add server/docx-generator.ts
-          git commit -m 'fix: improve DOCX math typography and source placeholders' || exit 0
+          git commit -m 'fix: improve DOCX math typography and visual placeholders' || exit 0
           git push
