@@ -68,7 +68,7 @@ jobs:
           qpos=s.find(qhead)
           if qpos<0: raise SystemExit('questionTable not found')
           if 'applySourceQA(q);' not in s[qpos:qpos+1000]:
-              ins='''\n  applySourceQA(q);\n  if(needsSourceImage(q) && !q.diagramSvg) q.diagramSvg=`<svg xmlns="http://www.w3.org/2000/svg" width="900" height="180"><rect x="8" y="8" width="884" height="164" fill="#F8FAFC" stroke="#94A3B8" stroke-width="3" stroke-dasharray="10 8"/><text x="450" y="82" text-anchor="middle" font-family="Arial" font-size="26" font-weight="700" fill="#475569">ORIGINAL PDF IMAGE PLACEHOLDER</text><text x="450" y="122" text-anchor="middle" font-family="Arial" font-size="20" fill="#64748B">Replace with the exact image from the source PDF</text></svg>`;'''
+              ins='''\n  applySourceQA(q);\n  if(needsSourceImage(q)) q.diagramSvg=`<svg xmlns="http://www.w3.org/2000/svg" width="900" height="180"><rect x="8" y="8" width="884" height="164" fill="#F8FAFC" stroke="#94A3B8" stroke-width="3" stroke-dasharray="10 8"/><text x="450" y="82" text-anchor="middle" font-family="Arial" font-size="26" font-weight="700" fill="#475569">ORIGINAL PDF IMAGE PLACEHOLDER</text><text x="450" y="122" text-anchor="middle" font-family="Arial" font-size="20" fill="#64748B">Replace with the exact image from the source PDF</text></svg>`;'''
               s=s[:qpos+len(qhead)]+ins+s[qpos+len(qhead):]
           p.write_text(s,encoding='utf-8')
           print('patched')
