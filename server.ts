@@ -10,6 +10,7 @@ import { aiRegistry } from './server/ai/provider.js';
 import { generateDocxBuffer } from './server/docx-generator.js';
 import { chatWithJarvis } from './server/chat.js';
 import { persistenceInfo, saveCustomAgents, saveMemories, loadTasks, getTask, deleteTask, clearTasks } from './server/persistence.js';
+import { enrichFilesWithMarkdown, convertFileToMarkdown } from './server/document-markdown.js';
 
 dotenv.config();
 
@@ -96,11 +97,24 @@ async function startServer() {
     catch (err: any) { res.status(500).json({ error: err.message }); }
   });
 
+  app.post('/api/documents/markdown', async (req, res) => {
+    try {
+      const { file } = req.body;
+      if (!file?.name || !file?.base64Data) return res.status(400).json({ error: 'A file with name and base64Data is required' });
+      const markdown = await convertFileToMarkdown(file);
+      res.json({ name: file.name, markdown });
+    } catch (err: any) {
+      console.error('[MarkItDown Error]', err);
+      res.status(500).json({ error: err.message || 'Document conversion failed' });
+    }
+  });
+
   app.post('/api/tasks/execute', async (req, res) => {
     try {
       const { userPrompt, selectedAgentId, attachedFiles, model, settings } = req.body;
       if (!userPrompt && (!attachedFiles || attachedFiles.length === 0)) return res.status(400).json({ error: 'Prompt or attached file is required' });
-      const task = await TaskRunner.execute({ userPrompt: userPrompt || 'Process the attached document.', selectedAgentId, attachedFiles, model, settings });
+      const enrichedFiles = await enrichFilesWithMarkdown(attachedFiles);
+      const task = await TaskRunner.execute({ userPrompt: userPrompt || 'Process the attached document.', selectedAgentId, attachedFiles: enrichedFiles, model, settings });
       persistAgents();
       res.json({ task });
     } catch (err: any) { console.error('[Execute Task Error]', err); res.status(500).json({ error: err.message || 'Task execution failed' }); }
@@ -112,7 +126,8 @@ async function startServer() {
     res.status(200); res.setHeader('Content-Type', 'text/event-stream; charset=utf-8'); res.setHeader('Cache-Control', 'no-cache, no-transform'); res.setHeader('Connection', 'keep-alive'); res.setHeader('X-Accel-Buffering', 'no'); (res as any).flushHeaders?.();
     const send = (payload: any) => { if (!(res as any).writableEnded) res.write(`data: ${JSON.stringify(payload)}\n\n`); };
     try {
-      const task = await TaskRunner.execute({ userPrompt: userPrompt || 'Process the attached document.', selectedAgentId, attachedFiles, model, settings, onStep: step => send({ type: 'step', step }) });
+      const enrichedFiles = await enrichFilesWithMarkdown(attachedFiles);
+      const task = await TaskRunner.execute({ userPrompt: userPrompt || 'Process the attached document.', selectedAgentId, attachedFiles: enrichedFiles, model, settings, onStep: step => send({ type: 'step', step }) });
       persistAgents(); send({ type: 'task', task }); send({ type: 'done' });
     } catch (err: any) { send({ type: 'error', error: err.message || 'Task execution failed' }); }
     finally { if (!(res as any).writableEnded) res.end(); }
