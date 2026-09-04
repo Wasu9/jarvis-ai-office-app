@@ -1,0 +1,72 @@
+name: Repair fidelity
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/repair-fidelity.yml'
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Repair source helper and validate build
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          p = Path('server/task-runner.ts')
+          s = p.read_text()
+          start = s.find('function sourceQuestionReference')
+          if start < 0:
+              raise SystemExit('sourceQuestionReference not found')
+          end = s.find('function normalizeOption', start)
+          if end < 0:
+              raise SystemExit('normalizeOption anchor not found')
+          helper = '''function sourceQuestionReference(files: AttachedFile[] | undefined, start: number, end: number): string {
+            const source = (files || []).map(f => typeof f.textPreview === 'string' ? f.textPreview : '').filter(Boolean).join('\\n\\n');
+            if (!source.trim()) return '';
+            const matches = [...source.matchAll(/(?:^|\\n)\\s*(?:Q(?:uestion)?\\s*\\.?\\s*)?(\\d{1,3})[.)]\\s+/gi)];
+            let runIndex = -1, runLength = 0;
+            for (let i = 0; i < matches.length; i++) {
+              if (Number(matches[i][1]) !== 1) continue;
+              let expected = 1, j = i;
+              while (j < matches.length && Number(matches[j][1]) === expected) { expected++; j++; }
+              if (expected - 1 > runLength) { runIndex = i; runLength = expected - 1; }
+            }
+            if (runIndex < 0) return '';
+            const ranges = new Map<number, { start: number; end: number }>();
+            for (let j = runIndex; j < runIndex + runLength; j++) {
+              const n = Number(matches[j][1]);
+              ranges.set(n, { start: matches[j].index, end: j + 1 < matches.length ? matches[j + 1].index : source.length });
+            }
+            const first = ranges.get(start), last = ranges.get(end);
+            return first && last ? source.slice(first.start, last.end).slice(0, 24000).trim() : '';
+          }
+
+          '''
+          s = s[:start] + helper + s[end:]
+          p.write_text(s)
+
+          p = Path('src/components/FileDropzone.tsx')
+          s = p.read_text().replace('await pdf.destroy();', 'await (pdf as any).destroy?.();')
+          p.write_text(s)
+          PY
+          npm ci --ignore-scripts
+          npm run build
+      - name: Verify repaired files
+        run: |
+          grep -q "function sourceQuestionReference" server/task-runner.ts
+          grep -q "AUTHORITATIVE PDF TEXT LAYER" server/task-runner.ts
+          grep -q "destroy?.()" src/components/FileDropzone.tsx
+      - name: Commit and remove temporary workflows
+        shell: bash
+        run: |
+          git config user.name "JARVIS Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add server/task-runner.ts src/components/FileDropzone.tsx
+          git rm -f .github/workflows/repair-fidelity.yml .github/workflows/fix-source-fidelity-2.yml 2>/dev/null || true
+          git commit -m "fix: restore valid source fidelity pipeline"
+          git push
