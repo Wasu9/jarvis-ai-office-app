@@ -29,8 +29,6 @@ async function detectSourceQuestionCount(params:TaskRequest):Promise<number>{
         break;
       }
       lastError=String(data?.error||`Source question-count service returned HTTP ${res.status}.`);
-      // Retry transient server/rate-limit failures, but do not hide a deterministic
-      // unresolved-document result behind three identical requests.
       if(res.status===422||res.status===400)break;
     }catch(error){
       lastError=error instanceof Error?error.message:'Source question-count request failed.';
@@ -67,8 +65,8 @@ export class ApiService{
     return this.executeTaskStream(params,step=>dispatchLiveStep(step));
   }
   static async executeLargeSourceTask(params:TaskRequest,total:number):Promise<TaskRecord>{
-    const started=Date.now();const chunkSize=20;const startFrom=Math.min(total,Math.max(1,Number(params.resumeFrom||1)));let completed=Math.max(0,startFrom-1);let resumeQuestions=Array.isArray(params.resumeQuestions)?[...params.resumeQuestions]:[];let lastTask:TaskRecord|null=null;const allSteps:TaskStep[]=[];
-    dispatchLiveStep({status:'generating',label:`SOURCE PLAN · ${total} questions · chunked execution`,timestamp:new Date().toISOString(),details:`Source count is locked at ${total}; no 180-question fallback exists.`});
+    const started=Date.now();const chunkSize=10;const startFrom=Math.min(total,Math.max(1,Number(params.resumeFrom||1)));let completed=Math.max(0,startFrom-1);let resumeQuestions=Array.isArray(params.resumeQuestions)?[...params.resumeQuestions]:[];let lastTask:TaskRecord|null=null;const allSteps:TaskStep[]=[];
+    dispatchLiveStep({status:'generating',label:`SOURCE PLAN · ${total} questions · chunked execution`,timestamp:new Date().toISOString(),details:`Source count is locked at ${total}; chunks are capped at ${chunkSize} questions to stay safely below the Vercel runtime ceiling.`});
     for(let start=startFrom;start<=total;start+=chunkSize){
       const end=Math.min(start+chunkSize-1,total);
       const chunkPrompt=`${params.userPrompt} Process exactly ${total} questions from the attached source. CURRENT CHUNK ONLY: extract Q.${start}–Q.${end}. Do not process questions outside this range.`;
