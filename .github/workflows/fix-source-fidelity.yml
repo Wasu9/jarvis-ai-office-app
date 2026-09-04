@@ -11,56 +11,45 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Patch source extraction prompt
+      - name: Patch source extraction
         shell: bash
         run: |
           python - <<'PY'
           from pathlib import Path
-          import re
 
           p = Path('server/task-runner.ts')
           s = p.read_text()
           helper_marker = "function sleep(ms:number){return new Promise(r=>setTimeout(r,ms));}"
           helper = r'''\n\nfunction sourceQuestionReference(files: AttachedFile[] | undefined, start: number, end: number): string {\n  const source = (files || []).map(f => typeof f.textPreview === 'string' ? f.textPreview : '').filter(Boolean).join('\\n\\n');\n  if (!source.trim()) return '';\n  const matches = [...source.matchAll(/(?:^|\\n)\\s*(?:Q(?:uestion)?\\s*\\.?\\s*)?(\\d{1,3})[.)]\\s+/gi)];\n  let runIndex = -1, runLength = 0;\n  for (let i = 0; i < matches.length; i++) {\n    if (Number(matches[i][1]) !== 1) continue;\n    let expected = 1, j = i;\n    while (j < matches.length && Number(matches[j][1]) === expected) { expected++; j++; }\n    if (expected - 1 > runLength) { runIndex = i; runLength = expected - 1; }\n  }\n  if (runIndex < 0) return '';\n  const ranges = new Map<number, { start: number; end: number }>();\n  for (let j = runIndex; j < runIndex + runLength; j++) {\n    const n = Number(matches[j][1]);\n    ranges.set(n, { start: matches[j].index, end: j + 1 < matches.length ? matches[j + 1].index : source.length });\n  }\n  const first = ranges.get(start), last = ranges.get(end);\n  return first && last ? source.slice(first.start, last.end).slice(0, 24000).trim() : '';\n}\n'''
           if 'function sourceQuestionReference' not in s:
+              if helper_marker not in s: raise SystemExit('sleep helper anchor not found')
               s = s.replace(helper_marker, helper_marker + helper, 1)
 
-          # Inject the source text reference immediately before the extraction call.
           needle = "const chunkRaw=await provider.generateText(`Extract ONLY source questions"
           pos = s.find(needle)
           if pos < 0: raise SystemExit('source extraction call not found')
-          prefix = "const sourceReference=sourceQuestionReference(params.attachedFiles,c.start,c.end);"
-          if s[max(0,pos-160):pos].find('sourceReference=sourceQuestionReference') < 0:
+          if 'sourceReference=sourceQuestionReference(params.attachedFiles,c.start,c.end)' not in s[max(0,pos-250):pos]:
+              prefix = "const sourceReference=sourceQuestionReference(params.attachedFiles,c.start,c.end);"
               s = s[:pos] + prefix + s[pos:]
               pos += len(prefix)
-          # Add a strict source-text layer inside the existing prompt, before its closing backtick.
           prompt_start = s.find('`', pos)
           prompt_end = s.find('`,{systemInstruction:system', prompt_start)
           if prompt_start < 0 or prompt_end < 0: raise SystemExit('extraction prompt boundaries not found')
           if 'AUTHORITATIVE PDF TEXT LAYER' not in s[prompt_start:prompt_end]:
-              addition = "\\n\\nAUTHORITATIVE PDF TEXT LAYER — this text was extracted from the same uploaded PDF before AI generation. Use it to recover every formula, fraction, superscript/subscript, vector, Greek symbol, unit, number, punctuation mark and word boundary. Never omit an expression because it is difficult to OCR. Do not solve or simplify.\\n<<<SOURCE TEXT>>>\\n${sourceReference}\\n<<<END SOURCE TEXT>>>"
+              addition = "\\n\\nAUTHORITATIVE PDF TEXT LAYER — extracted from the same uploaded PDF before AI generation. Use it to recover every formula, fraction, superscript/subscript, vector, Greek symbol, unit, number, punctuation mark and word boundary. Never omit an expression because it is difficult to OCR. Do not solve or simplify.\\n<<<SOURCE TEXT>>>\\n${sourceReference}\\n<<<END SOURCE TEXT>>>"
               s = s[:prompt_end] + addition + s[prompt_end:]
-          p.write_text(s)
-
-          p = Path('server/docx-generator.ts')
-          s = p.read_text()
-          pattern = re.compile(r"\s*if\(q\.sectionName && q\.sectionName !== previousSection\)\{.*?previousSection=q\.sectionName;\}", re.S)
-          replacement = "\n      if (q.sectionName && q.sectionName !== previousSection) {\n        // Attach section labels to the first question; standalone headings can be stranded by Word.\n        const sectionLabel = String(q.sectionName).trim();\n        const sectionPrefix = sectionLabel + '\\n';\n        q.textEn = sectionPrefix + q.textEn;\n        q.textHi = sectionPrefix + (q.textHi || '');\n        previousSection = q.sectionName;\n      }"
-          s, count = pattern.subn(replacement, s, count=1)
-          if count != 1: raise SystemExit('section heading block not found')
           p.write_text(s)
           PY
       - name: Verify
         run: |
           grep -q "sourceQuestionReference" server/task-runner.ts
           grep -q "AUTHORITATIVE PDF TEXT LAYER" server/task-runner.ts
-          grep -q "sectionPrefix" server/docx-generator.ts
       - name: Commit and remove workflow
         shell: bash
         run: |
           git config user.name "JARVIS Bot"
           git config user.email "actions@users.noreply.github.com"
-          git add server/task-runner.ts server/docx-generator.ts
+          git add server/task-runner.ts
           git rm .github/workflows/fix-source-fidelity.yml
-          git commit -m "fix: preserve source formulas and section flow"
+          git commit -m "fix: preserve source formulas from PDF text layer"
           git push
