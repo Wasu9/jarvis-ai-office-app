@@ -41,7 +41,9 @@ function wantsKey(prompt:string){return /answer\s*key|उत्तर\s*कु�
 function wantsSolutions(prompt:string){return /solution|solutions|step[- ]by[- ]step|विस्तृत हल|हल सहित/i.test(prompt);}
 function extractJson(text:string):any{const cleaned=text.replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/i,'').trim();try{return JSON.parse(cleaned);}catch{}const a=cleaned.indexOf('{'),b=cleaned.lastIndexOf('}');if(a>=0&&b>a){try{return JSON.parse(cleaned.slice(a,b+1));}catch{}}throw new Error('JARVIS received invalid structured data and stopped before creating the Word file.');}
 function countRequested(prompt:string):number|null{const m=prompt.match(/\b(\d{1,3})\s*(?:questions?|qs?|प्रश्न)\b/i);return m?Number(m[1]):null;}
-function sleep(ms:number){return new Promise(r=>setTimeout(r,ms));}\n\nfunction sourceQuestionReference(files: AttachedFile[] | undefined, start: number, end: number): string {
+function sleep(ms:number){return new Promise(r=>setTimeout(r,ms));}
+
+function sourceQuestionReference(files: AttachedFile[] | undefined, start: number, end: number): string {
   const source = (files || []).map(f => typeof f.textPreview === 'string' ? f.textPreview : '').filter(Boolean).join('\n\n');
   if (!source.trim()) return '';
   const matches = [...source.matchAll(/(?:^|\n)\s*(?:Q(?:uestion)?\s*\.?\s*)?(\d{1,3})[.)]\s+/gi)];
