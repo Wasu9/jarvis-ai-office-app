@@ -1,5 +1,6 @@
 import React, { useRef } from 'react';
 import { Paperclip, FileText, File, Image as ImageIcon, X } from 'lucide-react';
+import { extractText, getDocumentProxy } from 'unpdf';
 import { AttachedFile } from '../types';
 
 interface FileDropzoneProps {
@@ -7,6 +8,28 @@ interface FileDropzoneProps {
   onAddFiles: (files: AttachedFile[]) => void;
   onRemoveFile: (id: string) => void;
   disabled?: boolean;
+}
+
+const MAX_PDF_TEXT_PREVIEW = 120000;
+
+async function readPdfTextPreview(base64Data: string): Promise<string | undefined> {
+  try {
+    const raw = String(base64Data || '').replace(/^data:[^;]+;base64,/, '');
+    const binary = atob(raw);
+    const bytes = Uint8Array.from(binary, c => c.charCodeAt(0));
+    const pdf = await getDocumentProxy(bytes);
+    try {
+      const result = await extractText(pdf, { mergePages: false });
+      const pages = Array.isArray(result.text) ? result.text : [String(result.text || '')];
+      const text = pages.join('\n\n').trim();
+      return text ? text.slice(0, MAX_PDF_TEXT_PREVIEW) : undefined;
+    } finally {
+      try { await pdf.destroy(); } catch {}
+    }
+  } catch (error) {
+    console.warn('[JARVIS] PDF text-layer extraction failed; visual PDF input will still be used.', error);
+    return undefined;
+  }
 }
 
 export const FileDropzone: React.FC<FileDropzoneProps> = ({ attachedFiles, onAddFiles, onRemoveFile, disabled = false }) => {
@@ -20,7 +43,9 @@ export const FileDropzone: React.FC<FileDropzoneProps> = ({ attachedFiles, onAdd
       const id = `file-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
       const base64Data = await readFileAsBase64(file);
       let textPreview: string | undefined;
-      if (file.type.includes('text') || /\.(txt|md)$/i.test(file.name)) {
+      if (file.type.toLowerCase().includes('pdf') || /\.pdf$/i.test(file.name)) {
+        textPreview = await readPdfTextPreview(base64Data);
+      } else if (file.type.includes('text') || /\.(txt|md)$/i.test(file.name)) {
         textPreview = await readFileAsText(file);
       }
       newAttached.push({
