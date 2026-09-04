@@ -11,7 +11,7 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Patch source fidelity
+      - name: Patch source extraction prompt
         shell: bash
         run: |
           python - <<'PY'
@@ -20,49 +20,47 @@ jobs:
 
           p = Path('server/task-runner.ts')
           s = p.read_text()
-          if "from 'unpdf'" not in s:
-              s = s.replace("import { validateExecutionResult, validateTaskRecord } from './core-qa.js';", "import { validateExecutionResult, validateTaskRecord } from './core-qa.js';\nimport { extractText, getDocumentProxy } from 'unpdf';", 1)
+          helper_marker = "function sleep(ms:number){return new Promise(r=>setTimeout(r,ms));}"
+          helper = r'''\n\nfunction sourceQuestionReference(files: AttachedFile[] | undefined, start: number, end: number): string {\n  const source = (files || []).map(f => typeof f.textPreview === 'string' ? f.textPreview : '').filter(Boolean).join('\\n\\n');\n  if (!source.trim()) return '';\n  const matches = [...source.matchAll(/(?:^|\\n)\\s*(?:Q(?:uestion)?\\s*\\.?\\s*)?(\\d{1,3})[.)]\\s+/gi)];\n  let runIndex = -1, runLength = 0;\n  for (let i = 0; i < matches.length; i++) {\n    if (Number(matches[i][1]) !== 1) continue;\n    let expected = 1, j = i;\n    while (j < matches.length && Number(matches[j][1]) === expected) { expected++; j++; }\n    if (expected - 1 > runLength) { runIndex = i; runLength = expected - 1; }\n  }\n  if (runIndex < 0) return '';\n  const ranges = new Map<number, { start: number; end: number }>();\n  for (let j = runIndex; j < runIndex + runLength; j++) {\n    const n = Number(matches[j][1]);\n    ranges.set(n, { start: matches[j].index, end: j + 1 < matches.length ? matches[j + 1].index : source.length });\n  }\n  const first = ranges.get(start), last = ranges.get(end);\n  return first && last ? source.slice(first.start, last.end).slice(0, 24000).trim() : '';\n}\n'''
+          if 'function sourceQuestionReference' not in s:
+              s = s.replace(helper_marker, helper_marker + helper, 1)
 
-          if 'async function extractAuthoritativePdfText' not in s:
-              marker = "function sleep(ms:number){return new Promise(r=>setTimeout(r,ms));}"
-              helper = r'''\n\nasync function extractAuthoritativePdfText(files?: AttachedFile[]): Promise<string> {\n  const file = files?.find(f => f.base64Data && (f.type?.toLowerCase().includes('pdf') || f.name.toLowerCase().endsWith('.pdf')));\n  if (!file?.base64Data) return '';\n  const raw = String(file.base64Data).replace(/^data:[^;]+;base64,/, '');\n  const bytes = Buffer.from(raw, 'base64');\n  const pdf = await getDocumentProxy(new Uint8Array(bytes));\n  try {\n    const result = await extractText(pdf, { mergePages: false });\n    return Array.isArray(result.text) ? result.text.join('\\n\\n') : String(result.text || '');\n  } finally {\n    try { await pdf.destroy(); } catch {}\n  }\n}\n\nfunction authoritativeQuestionRange(text: string, start: number, end: number): string {\n  if (!text.trim()) return '';\n  const matches = [...text.matchAll(/(?:^|\\n)\\s*(?:Q(?:uestion)?\\s*\\.?\\s*)?(\\d{1,3})[.)]\\s+/gi)];\n  const candidates: Array<{ index: number; length: number }> = [];\n  for (let i = 0; i < matches.length; i++) {\n    if (Number(matches[i][1]) !== 1) continue;\n    let expected = 1, j = i;\n    while (j < matches.length && Number(matches[j][1]) === expected) { expected++; j++; }\n    if (expected > 3) candidates.push({ index: i, length: expected - 1 });\n  }\n  const run = candidates.sort((a,b) => b.length - a.length)[0];\n  if (!run) return '';\n  const byNumber = new Map<number, { start: number; end: number }>();\n  for (let j = run.index; j < run.index + run.length; j++) {\n    const n = Number(matches[j][1]);\n    byNumber.set(n, { start: matches[j].index, end: j + 1 < matches.length ? matches[j + 1].index : text.length });\n  }\n  const first = byNumber.get(start), last = byNumber.get(end);\n  if (!first || !last) return '';\n  return text.slice(first.start, last.end).slice(0, 24000).trim();\n}\n'''
-              s = s.replace(marker, marker + helper, 1)
-
-          method_start = s.find('static async executeLargeSourceTask')
-          if method_start < 0: raise SystemExit('executeLargeSourceTask not found')
-          allsteps = s.find('const allSteps:TaskStep[]=[];', method_start)
-          if allsteps < 0: raise SystemExit('allSteps anchor not found')
-          inject_end = allsteps + len('const allSteps:TaskStep[]=[];')
-          if 'let authoritativeText=' not in s[method_start:inject_end+1200]:
-              inject = "let authoritativeText='';try{authoritativeText=await extractAuthoritativePdfText(params.attachedFiles);if(authoritativeText)dispatchLiveStep({status:'checking',label:'SOURCE TEXT LAYER · PDF text extracted',timestamp:new Date().toISOString(),details:'Using the original PDF text layer as an additional fidelity reference for formulas, symbols, spacing and units.'});}catch(error){console.warn('[Source Fidelity] PDF text extraction unavailable; continuing with visual source input.',error);}"
-              s = s[:inject_end] + inject + s[inject_end:]
-
-          chunk_pattern = re.compile(r"const chunkPrompt=`\$\{params\.userPrompt\} Process exactly \$\{total\} questions from the attached source\. CURRENT CHUNK ONLY: extract Q\.\$\{start\}–Q\.\$\{end\}\. Do not process questions outside this range\.`;")
-          chunk_replacement = "const sourceReference=authoritativeQuestionRange(authoritativeText,start,end);const chunkPrompt=`${params.userPrompt} Process exactly ${total} questions from the attached source. CURRENT CHUNK ONLY: extract Q.${start}–Q.${end}. Do not process questions outside this range.\\n\\nAUTHORITATIVE ORIGINAL-PDF TEXT LAYER — USE THIS AS A CHARACTER-LEVEL FIDELITY REFERENCE. It is extracted from the same uploaded PDF, not generated by the model. Recover every mathematical expression, superscript/subscript, vector, Greek letter, fraction, unit, number, punctuation mark and word boundary represented here. If the text layer contains a layout artifact, inspect the attached PDF visually and use the visual source, but NEVER omit an expression simply because OCR/text extraction is inconvenient. Do not solve or simplify formulas.\\n<<<SOURCE TEXT Q.${start}–Q.${end}>>>\\n${sourceReference}\\n<<<END SOURCE TEXT>>>`;"
-          s, count = chunk_pattern.subn(chunk_replacement, s, count=1)
-          if count != 1: raise SystemExit('chunkPrompt anchor not found')
-
+          # Inject the source text reference immediately before the extraction call.
+          needle = "const chunkRaw=await provider.generateText(`Extract ONLY source questions"
+          pos = s.find(needle)
+          if pos < 0: raise SystemExit('source extraction call not found')
+          prefix = "const sourceReference=sourceQuestionReference(params.attachedFiles,c.start,c.end);"
+          if s[max(0,pos-160):pos].find('sourceReference=sourceQuestionReference') < 0:
+              s = s[:pos] + prefix + s[pos:]
+              pos += len(prefix)
+          # Add a strict source-text layer inside the existing prompt, before its closing backtick.
+          prompt_start = s.find('`', pos)
+          prompt_end = s.find('`,{systemInstruction:system', prompt_start)
+          if prompt_start < 0 or prompt_end < 0: raise SystemExit('extraction prompt boundaries not found')
+          if 'AUTHORITATIVE PDF TEXT LAYER' not in s[prompt_start:prompt_end]:
+              addition = "\\n\\nAUTHORITATIVE PDF TEXT LAYER — this text was extracted from the same uploaded PDF before AI generation. Use it to recover every formula, fraction, superscript/subscript, vector, Greek symbol, unit, number, punctuation mark and word boundary. Never omit an expression because it is difficult to OCR. Do not solve or simplify.\\n<<<SOURCE TEXT>>>\\n${sourceReference}\\n<<<END SOURCE TEXT>>>"
+              s = s[:prompt_end] + addition + s[prompt_end:]
           p.write_text(s)
 
           p = Path('server/docx-generator.ts')
           s = p.read_text()
-          section_pattern = re.compile(r"\s*if\(q\.sectionName && q\.sectionName !== previousSection\)\{.*?previousSection=q\.sectionName;\}", re.S)
-          section_replacement = "\n      if (q.sectionName && q.sectionName !== previousSection) {\n        // Attach section labels to the first question so Word cannot strand a heading on its own page.\n        const sectionLabel = String(q.sectionName).trim();\n        const sectionPrefix = sectionLabel + '\\n';\n        q.textEn = sectionPrefix + q.textEn;\n        q.textHi = sectionPrefix + (q.textHi || '');\n        previousSection = q.sectionName;\n      }"
-          s, count = section_pattern.subn(section_replacement, s, count=1)
-          if count != 1: raise SystemExit('section heading anchor not found')
+          pattern = re.compile(r"\s*if\(q\.sectionName && q\.sectionName !== previousSection\)\{.*?previousSection=q\.sectionName;\}", re.S)
+          replacement = "\n      if (q.sectionName && q.sectionName !== previousSection) {\n        // Attach section labels to the first question; standalone headings can be stranded by Word.\n        const sectionLabel = String(q.sectionName).trim();\n        const sectionPrefix = sectionLabel + '\\n';\n        q.textEn = sectionPrefix + q.textEn;\n        q.textHi = sectionPrefix + (q.textHi || '');\n        previousSection = q.sectionName;\n      }"
+          s, count = pattern.subn(replacement, s, count=1)
+          if count != 1: raise SystemExit('section heading block not found')
           p.write_text(s)
           PY
-      - name: Verify patch
+      - name: Verify
         run: |
-          grep -q "extractAuthoritativePdfText" server/task-runner.ts
-          grep -q "AUTHORITATIVE ORIGINAL-PDF TEXT LAYER" server/task-runner.ts
+          grep -q "sourceQuestionReference" server/task-runner.ts
+          grep -q "AUTHORITATIVE PDF TEXT LAYER" server/task-runner.ts
           grep -q "sectionPrefix" server/docx-generator.ts
-      - name: Commit patch and remove workflow
+      - name: Commit and remove workflow
         shell: bash
         run: |
           git config user.name "JARVIS Bot"
           git config user.email "actions@users.noreply.github.com"
           git add server/task-runner.ts server/docx-generator.ts
           git rm .github/workflows/fix-source-fidelity.yml
-          git commit -m "fix: preserve source math and prevent section orphan pages"
+          git commit -m "fix: preserve source formulas and section flow"
           git push
