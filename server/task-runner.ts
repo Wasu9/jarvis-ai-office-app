@@ -41,7 +41,27 @@ function wantsKey(prompt:string){return /answer\s*key|उत्तर\s*कु�
 function wantsSolutions(prompt:string){return /solution|solutions|step[- ]by[- ]step|विस्तृत हल|हल सहित/i.test(prompt);}
 function extractJson(text:string):any{const cleaned=text.replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/i,'').trim();try{return JSON.parse(cleaned);}catch{}const a=cleaned.indexOf('{'),b=cleaned.lastIndexOf('}');if(a>=0&&b>a){try{return JSON.parse(cleaned.slice(a,b+1));}catch{}}throw new Error('JARVIS received invalid structured data and stopped before creating the Word file.');}
 function countRequested(prompt:string):number|null{const m=prompt.match(/\b(\d{1,3})\s*(?:questions?|qs?|प्रश्न)\b/i);return m?Number(m[1]):null;}
-function sleep(ms:number){return new Promise(r=>setTimeout(r,ms));}\n\nfunction sourceQuestionReference(files: AttachedFile[] | undefined, start: number, end: number): string {\n  const source = (files || []).map(f => typeof f.textPreview === 'string' ? f.textPreview : '').filter(Boolean).join('\\n\\n');\n  if (!source.trim()) return '';\n  const matches = [...source.matchAll(/(?:^|\\n)\\s*(?:Q(?:uestion)?\\s*\\.?\\s*)?(\\d{1,3})[.)]\\s+/gi)];\n  let runIndex = -1, runLength = 0;\n  for (let i = 0; i < matches.length; i++) {\n    if (Number(matches[i][1]) !== 1) continue;\n    let expected = 1, j = i;\n    while (j < matches.length && Number(matches[j][1]) === expected) { expected++; j++; }\n    if (expected - 1 > runLength) { runIndex = i; runLength = expected - 1; }\n  }\n  if (runIndex < 0) return '';\n  const ranges = new Map<number, { start: number; end: number }>();\n  for (let j = runIndex; j < runIndex + runLength; j++) {\n    const n = Number(matches[j][1]);\n    ranges.set(n, { start: matches[j].index, end: j + 1 < matches.length ? matches[j + 1].index : source.length });\n  }\n  const first = ranges.get(start), last = ranges.get(end);\n  return first && last ? source.slice(first.start, last.end).slice(0, 24000).trim() : '';\n}\n
+function sleep(ms:number){return new Promise(r=>setTimeout(r,ms));}\n\nfunction sourceQuestionReference(files: AttachedFile[] | undefined, start: number, end: number): string {
+  const source = (files || []).map(f => typeof f.textPreview === 'string' ? f.textPreview : '').filter(Boolean).join('\n\n');
+  if (!source.trim()) return '';
+  const matches = [...source.matchAll(/(?:^|\n)\s*(?:Q(?:uestion)?\s*\.?\s*)?(\d{1,3})[.)]\s+/gi)];
+  let runIndex = -1, runLength = 0;
+  for (let i = 0; i < matches.length; i++) {
+    if (Number(matches[i][1]) !== 1) continue;
+    let expected = 1, j = i;
+    while (j < matches.length && Number(matches[j][1]) === expected) { expected++; j++; }
+    if (expected - 1 > runLength) { runIndex = i; runLength = expected - 1; }
+  }
+  if (runIndex < 0) return '';
+  const ranges = new Map<number, { start: number; end: number }>();
+  for (let j = runIndex; j < runIndex + runLength; j++) {
+    const n = Number(matches[j][1]);
+    ranges.set(n, { start: matches[j].index, end: j + 1 < matches.length ? matches[j + 1].index : source.length });
+  }
+  const first = ranges.get(start), last = ranges.get(end);
+  return first && last ? source.slice(first.start, last.end).slice(0, 24000).trim() : '';
+}
+
 function normalizeOption(n:string){const s=String(n||'').trim().toUpperCase();return ({A:'1',B:'2',C:'3',D:'4'} as Record<string,string>)[s]||s;}
 function visualLikely(q:any){return /(figure|fig\.|graph|plot|diagram|image|shown below|given below|चित्र|आरेख|ग्राफ|नीचे दिया|नीचे दिए)/i.test(`${q.textEn||''} ${q.textHi||''}`);}
 

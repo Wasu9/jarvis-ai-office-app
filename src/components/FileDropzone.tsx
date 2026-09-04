@@ -24,7 +24,7 @@ async function readPdfTextPreview(base64Data: string): Promise<string | undefine
       const text = pages.join('\n\n').trim();
       return text ? text.slice(0, MAX_PDF_TEXT_PREVIEW) : undefined;
     } finally {
-      try { await pdf.destroy(); } catch {}
+      try { await (pdf as any).destroy?.(); } catch {}
     }
   } catch (error) {
     console.warn('[JARVIS] PDF text-layer extraction failed; visual PDF input will still be used.', error);
