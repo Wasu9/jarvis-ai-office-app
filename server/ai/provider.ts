@@ -37,6 +37,10 @@ function stripDataUrl(data: string): string { return String(data || '').replace(
 
 async function buildDocumentContext(files?: DocumentFile[]): Promise<string> {
   if (!files?.length) return '';
+  // PDFs are sent directly to Gemini for native visual/text understanding.
+  // Do NOT load markitdown/pdfjs in Vercel serverless: pdfjs-dist requires DOMMatrix,
+  // which is a browser API and causes ReferenceError: DOMMatrix is not defined.
+  if (files.some(file => String(file.mimeType || '').toLowerCase().includes('pdf'))) return '';
   try {
     const mod: any = await import('markitdown-ts');
     const MarkItDownCtor = mod.MarkItDown;
@@ -55,7 +59,7 @@ async function buildDocumentContext(files?: DocumentFile[]): Promise<string> {
     }
     return sections.join('\n\n--- DOCUMENT BREAK ---\n\n');
   } catch (error) {
-    console.warn('[MarkItDown] Optional document converter unavailable in this serverless runtime; using native Gemini document input.', error);
+    console.warn('[MarkItDown] Optional document converter unavailable; continuing with original inline file.', error);
     return '';
   }
 }
@@ -99,19 +103,11 @@ export class GeminiProvider implements AIProvider {
       try {
         const config: Record<string, any> = { systemInstruction: options?.systemInstruction, responseMimeType: options?.responseMimeType, responseSchema: options?.responseSchema };
         if (!currentModel.startsWith('gemini-3.')) config.temperature = options?.temperature ?? 0.35;
-        const outputText = await this.callModel(client, currentModel, contentsParts, config);
-
-        // Structured source-PDF question extraction gets a second, independent visual pass.
-        // This specifically catches dropped decimals, fractions, exponents, Greek symbols and options.
-        const sourceQuestionExtraction = !!options?.responseSchema && inlineFiles.some(f => String(f.mimeType).toLowerCase().includes('pdf')) && /SOURCE-LOCK MODE/i.test(options?.systemInstruction || '') && /Extract ONLY source questions Q\./i.test(prompt);
-        if (sourceQuestionExtraction) {
-          const verifyParts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [];
-          for (const file of inlineFiles) if (file.data) verifyParts.push({ inlineData: { mimeType: file.mimeType, data: file.data } });
-          verifyParts.push({ text: `FINAL VISUAL SOURCE-FIDELITY CHECK. Inspect the attached original PDF itself, including the rendered page image, and verify this candidate JSON question-by-question. Return the same JSON schema and exact same question range. Correct ONLY transcription/extraction mistakes. Do not solve or improve the questions. Every printed digit, decimal point, minus sign, fraction, numerator/denominator, exponent, subscript, Greek letter, mathematical symbol, unit, punctuation, option value and statement number must be preserved exactly. Every mathematical expression MUST be enclosed in [[MATH:...]] using LaTeX. If a visual/graph/diagram/image exists, DO NOT redraw or generate it; leave diagramSvg blank. Candidate JSON:\n${outputText}` });
-          const verified = await this.callModel(client, currentModel, verifyParts, { systemInstruction: options?.systemInstruction, responseMimeType: options?.responseMimeType, responseSchema: options?.responseSchema });
-          return verified;
-        }
-        return outputText;
+        // Keep each source request to a single Gemini generation pass. The old second
+        // visual verification pass doubled PDF processing time and could push a Vercel
+        // invocation to the 300-second ceiling. Source extraction already runs in small
+        // checkpointed chunks and is validated for count/numbering by TaskRunner.
+        return await this.callModel(client, currentModel, contentsParts, config);
       } catch (err: any) {
         lastError = err;
         const kind = this.classifyError(err);
