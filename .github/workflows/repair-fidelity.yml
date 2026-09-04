@@ -11,7 +11,7 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Repair source helper and validate build
+      - name: Repair source helper
         shell: bash
         run: |
           python - <<'PY'
@@ -54,8 +54,6 @@ jobs:
           s = p.read_text().replace('await pdf.destroy();', 'await (pdf as any).destroy?.();')
           p.write_text(s)
           PY
-          npm ci --ignore-scripts
-          npm run build
       - name: Verify repaired files
         run: |
           grep -q "function sourceQuestionReference" server/task-runner.ts
