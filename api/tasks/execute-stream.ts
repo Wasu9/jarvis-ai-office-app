@@ -41,7 +41,9 @@ export default async function handler(req: any, res: any) {
 
     let task: any = null;
     let lastError = '';
-    const maxAttempts = sourceChunk ? 3 : 1;
+    // Chunk-level recovery is owned by the client/recovery brain. Retrying the entire
+    // source chunk inside one Vercel invocation can consume the full 300s runtime limit.
+    const maxAttempts = 1;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
@@ -62,7 +64,7 @@ export default async function handler(req: any, res: any) {
     }
 
     if (task?.status === 'failed' && sourceChunk) {
-      task = { ...task, error: `Automatic source-chunk retries exhausted: ${lastError || task.error || 'unknown error'}` };
+      task = { ...task, error: `Source chunk failed: ${lastError || task.error || 'unknown error'}` };
     }
     res.write(`data: ${JSON.stringify({ type: 'task', task })}\n\n`);
   } catch (err: any) {
