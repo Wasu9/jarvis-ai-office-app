@@ -1,0 +1,97 @@
+name: Repair DOCX build
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Restore missing DOCX helpers
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          p = Path('server/docx-generator.ts')
+          s = p.read_text(encoding='utf-8')
+
+          helpers = r'''
+          function studentInfoTable():Table{
+            return new Table({width:{size:100,type:WidthType.PERCENTAGE},rows:[
+              new TableRow({cantSplit:true,children:[makeCell([textParagraph('STUDENT INFORMATION / छात्र विवरण',{bold:true,size:BODY_SIZE,color:'FFFFFF',align:AlignmentType.CENTER,after:0})],100,'164E63')]}),
+              new TableRow({cantSplit:true,children:[makeCell([field('Student Name')],50),makeCell([field('Admission No.')],50)]}),
+              new TableRow({cantSplit:true,children:[makeCell([field('Roll No.')],50),makeCell([field('Section')],50)]})
+            ],borders:THIN_BORDERS});
+          }
+          function normalizeInstruction(text:string):string{return sanitizeTextInput(text).trim().replace(/^\s*(?:\(?\d{1,3}[.)]|[-•])\s*/,'').trim();}
+          function instructionBlock(instructions:string[]):Paragraph[]{
+            if(!instructions.length)return[];
+            const output=[textParagraph('IMPORTANT INSTRUCTIONS / महत्वपूर्ण निर्देश',{bold:true,size:BODY_SIZE,color:'164E63',before:60,after:20,keepNext:true})];
+            for(let i=0;i<instructions.length;i++) output.push(textParagraph(`${i+1}. ${normalizeInstruction(instructions[i])}`,{size:BODY_SIZE,after:14}));
+            return output;
+          }
+          async function renderDiagram(svg?:string):Promise<Paragraph|null>{
+            if(!svg?.trim())return null;
+            try{
+              const normalized=svg.trim().replace(/^```(?:svg|xml)?/i,'').replace(/```$/,'').trim();
+              const metadata=await sharp(Buffer.from(normalized,'utf8')).metadata();
+              const originalWidth=Math.max(1,Number(metadata.width)||560);
+              const originalHeight=Math.max(1,Number(metadata.height)||280);
+              const width=Math.max(180,Math.min(560,originalWidth));
+              const height=Math.max(90,Math.round(originalHeight*(width/originalWidth)));
+              const data=await sharp(Buffer.from(normalized,'utf8')).resize({width,withoutEnlargement:true}).png().toBuffer();
+              return new Paragraph({alignment:AlignmentType.CENTER,spacing:{before:50,after:60},children:[new ImageRun({type:'png',data,transformation:{width,height}})]});
+            }catch{return null;}
+          }
+          function isMatchColumn(text:string,options:string[]):boolean{
+            const combined=`${text} ${options.join(' ')}`;
+            return /column\s*i\b[\s\S]{0,300}column\s*ii\b/i.test(combined)||/कॉलम\s*i\b[\s\S]{0,300}कॉलम\s*ii\b/i.test(combined);
+          }
+          function matchTable(options:string[],hindi=false):Table|null{
+            const rows:Array<{a:string;b:string}>=[];
+            for(const raw of options.slice(0,4)){
+              const s=stripLeadingLabel(raw);
+              const m=s.match(/^([A-D])\s*[.)\-:]\s*([\s\S]*?)\s*(?:\||--|—|\t|\n)\s*([IVX]+)\s*[.)\-:]\s*([\s\S]+)$/i);
+              if(m)rows.push({a:`${m[1]}. ${m[2].trim()}`,b:`${m[3]}. ${m[4].trim()}`});
+            }
+            if(rows.length<2)return null;
+            return new Table({width:{size:100,type:WidthType.PERCENTAGE},rows:[
+              new TableRow({cantSplit:true,children:[makeCell([textParagraph('Column I',{bold:true,size:BODY_SIZE,align:AlignmentType.CENTER,after:0})],50,'E2E8F0'),makeCell([textParagraph('Column II',{bold:true,size:BODY_SIZE,align:AlignmentType.CENTER,after:0})],50,'E2E8F0')]}),
+              ...rows.map(r=>new TableRow({cantSplit:true,children:[makeCell([textParagraph(r.a,{size:BODY_SIZE,hindi,after:0})],50),makeCell([textParagraph(r.b,{size:BODY_SIZE,hindi,after:0})],50)]}))
+            ],borders:THIN_BORDERS});
+          }
+          '''
+
+          marker = 'async function questionTable('
+          if 'function studentInfoTable' not in s:
+              s = s.replace(marker, helpers + '\n' + marker, 1)
+
+          # Source-lock mode must never create fake image placeholders. Only render a real diagramSvg.
+          old = "if(needsSourceImage(q)){ const ph=sourceImagePlaceholder(`Q.${q.number}`); en.push(ph); hi.push(sourceImagePlaceholder(`Q.${q.number}`)); }\n  else if(q.diagramSvg?.trim()){"
+          new = "if(q.diagramSvg?.trim()){"
+          s = s.replace(old, new)
+
+          p.write_text(s, encoding='utf-8')
+
+      - name: Typecheck production build
+        run: npm run build
+
+      - name: Commit repair and remove one-time workflow
+        run: |
+          rm -f .github/workflows/repair-docx-build.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m 'fix: restore DOCX renderer helpers and build'
+          git push
