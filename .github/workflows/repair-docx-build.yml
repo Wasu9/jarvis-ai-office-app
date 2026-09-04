@@ -16,11 +16,13 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install dependencies
+        run: npm ci
+
       - name: Restore missing DOCX helpers
         shell: python
         run: |
           from pathlib import Path
-          import re
 
           p = Path('server/docx-generator.ts')
           s = p.read_text(encoding='utf-8')
@@ -60,8 +62,8 @@ jobs:
           function matchTable(options:string[],hindi=false):Table|null{
             const rows:Array<{a:string;b:string}>=[];
             for(const raw of options.slice(0,4)){
-              const s=stripLeadingLabel(raw);
-              const m=s.match(/^([A-D])\s*[.)\-:]\s*([\s\S]*?)\s*(?:\||--|—|\t|\n)\s*([IVX]+)\s*[.)\-:]\s*([\s\S]+)$/i);
+              const ss=stripLeadingLabel(raw);
+              const m=ss.match(/^([A-D])\s*[.)\-:]\s*([\s\S]*?)\s*(?:\||--|—|\t|\n)\s*([IVX]+)\s*[.)\-:]\s*([\s\S]+)$/i);
               if(m)rows.push({a:`${m[1]}. ${m[2].trim()}`,b:`${m[3]}. ${m[4].trim()}`});
             }
             if(rows.length<2)return null;
@@ -70,28 +72,40 @@ jobs:
               ...rows.map(r=>new TableRow({cantSplit:true,children:[makeCell([textParagraph(r.a,{size:BODY_SIZE,hindi,after:0})],50),makeCell([textParagraph(r.b,{size:BODY_SIZE,hindi,after:0})],50)]}))
             ],borders:THIN_BORDERS});
           }
+          function optionTable(options:string[],hindi=false):Table{
+            const cleaned=options.slice(0,4).map((o,i)=>`(${i+1}) ${stripLeadingLabel(o,i+1)}`);
+            const long=cleaned.some(o=>o.length>60);
+            const rows:TableRow[]=[];
+            if(long){
+              for(const o of cleaned)rows.push(new TableRow({cantSplit:true,children:[makeCell([textParagraph(o,{size:BODY_SIZE,hindi,after:10})],100)]}));
+            }else{
+              for(let i=0;i<cleaned.length;i+=2){const row=cleaned.slice(i,i+2);rows.push(new TableRow({cantSplit:true,children:row.map(o=>makeCell([textParagraph(o,{size:BODY_SIZE,hindi,after:8})],50))}));}
+            }
+            return new Table({width:{size:100,type:WidthType.PERCENTAGE},rows,borders:{top:{style:BorderStyle.NONE,size:0,color:'FFFFFF'},bottom:{style:BorderStyle.NONE,size:0,color:'FFFFFF'},left:{style:BorderStyle.NONE,size:0,color:'FFFFFF'},right:{style:BorderStyle.NONE,size:0,color:'FFFFFF'},insideHorizontal:{style:BorderStyle.NONE,size:0,color:'FFFFFF'},insideVertical:{style:BorderStyle.NONE,size:0,color:'FFFFFF'}}});
+          }
           '''
 
-          marker = 'async function questionTable('
           if 'function studentInfoTable' not in s:
-              s = s.replace(marker, helpers + '\n' + marker, 1)
+              s = s.replace('async function questionTable(', helpers + '\n' + 'async function questionTable(', 1)
 
-          # Source-lock mode must never create fake image placeholders. Only render a real diagramSvg.
-          old = "if(needsSourceImage(q)){ const ph=sourceImagePlaceholder(`Q.${q.number}`); en.push(ph); hi.push(sourceImagePlaceholder(`Q.${q.number}`)); }\n  else if(q.diagramSvg?.trim()){"
-          new = "if(q.diagramSvg?.trim()){"
-          s = s.replace(old, new)
-
+          s = s.replace(
+              "if(needsSourceImage(q)){ const ph=sourceImagePlaceholder(`Q.${q.number}`); en.push(ph); hi.push(sourceImagePlaceholder(`Q.${q.number}`)); }\n  else if(q.diagramSvg?.trim()){",
+              "if(q.diagramSvg?.trim()){"
+          )
           p.write_text(s, encoding='utf-8')
 
-      - name: Typecheck production build
+      - name: Verify TypeScript build
         run: npm run build
 
-      - name: Commit repair and remove one-time workflow
+      - name: Commit repaired source and remove one-time workflow
         run: |
           rm -f .github/workflows/repair-docx-build.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
-          git diff --cached --quiet && exit 0
+          if git diff --cached --quiet; then
+            echo 'No source changes required.'
+            exit 0
+          fi
           git commit -m 'fix: restore DOCX renderer helpers and build'
           git push
