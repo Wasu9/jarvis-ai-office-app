@@ -53,7 +53,7 @@ export interface DocxPaperData {
 
 type TextOptions = {
   bold?: boolean; size?: number; color?: string; hindi?: boolean;
-  align?: AlignmentType; before?: number; after?: number;
+  align?: (typeof AlignmentType)[keyof typeof AlignmentType]; before?: number; after?: number;
   keepNext?: boolean; pageBreakBefore?: boolean;
 };
 
