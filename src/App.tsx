@@ -1,40 +1,116 @@
-import React,{useEffect,useState} from 'react';
-import {AgentDefinition,AttachedFile,JarvisMemoryItem,JarvisSettings,TaskRecord} from './types';
-import {ApiService,DEFAULT_SETTINGS} from './services/api';
-import {Header} from './components/Header';
-import {OfficeAssistant} from './components/OfficeAssistant';
-import {AgentManager} from './components/AgentManager';
-import {FileManager} from './components/FileManager';
-import {MemoryManager} from './components/MemoryManager';
-import {TaskHistory} from './components/TaskHistory';
-import {SettingsModal} from './components/SettingsModal';
-import {QuickExamBuilder} from './components/QuickExamBuilder';
-import {GlobalCommandBar} from './components/GlobalCommandBar';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { CheckCircle2, Download, FileText, Loader2, Upload, XCircle } from 'lucide-react';
+import { ApiService, DEFAULT_SETTINGS } from './services/api';
+import { AttachedFile, TaskRecord, TaskStep } from './types';
+import { FileDropzone } from './components/FileDropzone';
 
-const safeSetStorage=(key:string,value:string)=>{try{localStorage.setItem(key,value);return true;}catch(e){console.warn(`[JARVIS] localStorage quota/full for ${key}; keeping runtime state without persistence.`,e);return false;}};
-const compactTaskForStorage=(task:TaskRecord):TaskRecord=>{
- const copy:any={...task};
- if(Array.isArray(copy.attachedFiles)) copy.attachedFiles=copy.attachedFiles.map((f:any)=>{const {base64,data,content,...meta}=f||{};return meta;});
- if(copy.result?.artifacts) copy.result={...copy.result,artifacts:copy.result.artifacts.map((a:any)=>{const {base64,data,content,...meta}=a||{};return meta;})};
- return copy as TaskRecord;
-};
-const writeTaskHistory=(tasks:TaskRecord[])=>{
- const candidates=[...tasks.slice(0,50),...tasks.slice(50)];
- for(let count=Math.min(50,candidates.length);count>=1;count--){const trimmed=candidates.slice(0,count).map(compactTaskForStorage);if(safeSetStorage('jarvis_task_history',JSON.stringify(trimmed)))return;}
- try{localStorage.removeItem('jarvis_task_history');}catch{}
-};
-const writeUploadedFiles=(files:AttachedFile[])=>{
- const compact=files.map((f:any)=>{const {base64,data,content,...meta}=f||{};return meta;});
- safeSetStorage('jarvis_uploaded_files',JSON.stringify(compact));
-};
+function downloadArtifact(a: any) {
+  if (!a) return;
+  if (a.docxBase64) {
+    const bytes = Uint8Array.from(atob(a.docxBase64), c => c.charCodeAt(0));
+    const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = a.name || 'JARVIS-Bilingual-Paper.docx';
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return;
+  }
+  if (a.downloadUrl) window.open(a.downloadUrl, '_blank', 'noopener,noreferrer');
+}
 
-export default function App(){
- const [activeTab,setActiveTab]=useState<'assistant'|'agents'|'files'|'memory'|'history'>('assistant');
- const [agents,setAgents]=useState<AgentDefinition[]>([]);const [selectedAgentId,setSelectedAgentId]=useState('auto');const [memories,setMemories]=useState<JarvisMemoryItem[]>([]);const [settings,setSettings]=useState<JarvisSettings>(DEFAULT_SETTINGS);const [tasks,setTasks]=useState<TaskRecord[]>([]);const [activeTask,setActiveTask]=useState<TaskRecord|null>(null);const [uploadedFiles,setUploadedFiles]=useState<AttachedFile[]>([]);const [isSettingsOpen,setIsSettingsOpen]=useState(false);const [isQuickBuilderOpen,setIsQuickBuilderOpen]=useState(false);const [isAiConfigured,setIsAiConfigured]=useState(false);
- useEffect(()=>{const init=async()=>{try{const ss=localStorage.getItem('jarvis_settings');if(ss)try{setSettings(JSON.parse(ss));}catch{}const st=localStorage.getItem('jarvis_task_history');if(st)try{setTasks(JSON.parse(st));}catch{}const sf=localStorage.getItem('jarvis_uploaded_files');if(sf)try{setUploadedFiles(JSON.parse(sf));}catch{}const [a,m,h]=await Promise.all([ApiService.getAgents(),ApiService.getMemories(),ApiService.checkHealth()]);setAgents(a);setMemories(m);setIsAiConfigured(Boolean(h?.aiConfigured));}catch(e){console.error(e);setIsAiConfigured(false);}};void init();},[]);
- const refreshAgents=async()=>{try{setAgents(await ApiService.getAgents());}catch(e){console.error(e);}};const refreshMemories=async()=>{try{setMemories(await ApiService.getMemories());}catch(e){console.error(e);}};
- const handleSaveSettings=(s:JarvisSettings)=>{setSettings(s);safeSetStorage('jarvis_settings',JSON.stringify(s));};
- const handleTaskCompleted=(t:TaskRecord)=>{setTasks(p=>{const u=[t,...p.filter(x=>x.id!==t.id)].slice(0,50);writeTaskHistory(u);return u;});if(t.attachedFiles?.length)setUploadedFiles(p=>{const map=new Map<string,AttachedFile>(p.map(f=>[f.id,f] as const));t.attachedFiles!.forEach(f=>map.set(f.id,f));const u=Array.from(map.values());writeUploadedFiles(u);return u;});};
- const handleDeleteTask=(id:string)=>{setTasks(p=>{const u=p.filter(t=>t.id!==id);writeTaskHistory(u);return u;});if(activeTask?.id===id)setActiveTask(null);};const handleClearAllHistory=()=>{setTasks([]);setActiveTask(null);try{localStorage.removeItem('jarvis_task_history');}catch{}};const handleDeleteUploadedFile=(id:string)=>setUploadedFiles(p=>{const u=p.filter(f=>f.id!==id);writeUploadedFiles(u);return u;});const allGeneratedArtifacts=tasks.flatMap(t=>(t.result?.artifacts||[]).map(artifact=>({artifact,taskTitle:t.title,date:t.completedAt||t.createdAt})));
- return <div className="jarvis-shell text-slate-200"><Header activeTab={activeTab} setActiveTab={setActiveTab} onOpenSettings={()=>setIsSettingsOpen(true)} onOpenQuickBuilder={()=>setIsQuickBuilderOpen(true)} isAiConfigured={isAiConfigured} settings={settings} taskCount={tasks.length}/><main className="jarvis-main"><div className="jarvis-content">{activeTab==='assistant'&&<OfficeAssistant agents={agents} selectedAgentId={selectedAgentId} setSelectedAgentId={setSelectedAgentId} settings={settings} activeTask={activeTask} setActiveTask={setActiveTask} onTaskCompleted={handleTaskCompleted} onAgentHired={refreshAgents} recentTasks={tasks}/>} {activeTab==='agents'&&<AgentManager agents={agents} onSelectAgent={id=>{setSelectedAgentId(id);setActiveTab('assistant')}} onRefreshAgents={refreshAgents} onUsePrompt={()=>{}}/>} {activeTab==='files'&&<FileManager uploadedFiles={uploadedFiles} generatedArtifacts={allGeneratedArtifacts} onUploadFile={(files:AttachedFile[])=>{const u=[...files,...uploadedFiles];setUploadedFiles(u);writeUploadedFiles(u);}} onDeleteUploadedFile={handleDeleteUploadedFile} onProcessFile={()=>setActiveTab('assistant')}/>} {activeTab==='memory'&&<MemoryManager memories={memories} onRefreshMemories={refreshMemories}/>} {activeTab==='history'&&<TaskHistory tasks={tasks} onOpenTask={t=>{setActiveTask(t);setActiveTab('assistant')}} onRepeatTask={t=>{setSelectedAgentId(t.agentId);setActiveTab('assistant')}} onDeleteTask={handleDeleteTask} onClearHistory={handleClearAllHistory}/>}<footer className="mx-auto mt-8 flex w-full max-w-[1680px] flex-wrap items-center justify-between gap-3 px-1 py-3 text-[10px] text-slate-600"><div><span className={isAiConfigured?'text-emerald-400/70':'text-amber-400/70'}>● {isAiConfigured?'JARVIS online':'AI configuration required'}</span><span className="ml-4">{agents.length} employees</span></div><div>{settings.instituteName} · {settings.aiModel}</div></footer></div></main>{activeTab==='assistant'&&<GlobalCommandBar settings={settings} selectedAgentId={selectedAgentId} setActiveTask={setActiveTask} onTaskCompleted={handleTaskCompleted} onAgentHired={refreshAgents}/>}<QuickExamBuilder isOpen={isQuickBuilderOpen} onClose={()=>setIsQuickBuilderOpen(false)} onSubmit={async(promptText,agentId)=>{setSelectedAgentId(agentId);setActiveTab('assistant');try{const task=await ApiService.executeTask({userPrompt:promptText,selectedAgentId:agentId,model:settings.aiModel,settings});setActiveTask(task);handleTaskCompleted(task);}catch(e){console.error(e);}}} settings={settings}/><SettingsModal isOpen={isSettingsOpen} onClose={()=>setIsSettingsOpen(false)} settings={settings} onSave={handleSaveSettings}/></div>;
+export default function App() {
+  const [files, setFiles] = useState<AttachedFile[]>([]);
+  const [task, setTask] = useState<TaskRecord | null>(null);
+  const [liveSteps, setLiveSteps] = useState<TaskStep[]>([]);
+  const [error, setError] = useState('');
+  const [running, setRunning] = useState(false);
+  const liveRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onStep = (event: Event) => {
+      const step = (event as CustomEvent<TaskStep>).detail;
+      if (!step) return;
+      setLiveSteps(prev => [...prev.slice(-199), step]);
+      requestAnimationFrame(() => { if (liveRef.current) liveRef.current.scrollTop = liveRef.current.scrollHeight; });
+    };
+    window.addEventListener('jarvis-task-step', onStep);
+    return () => window.removeEventListener('jarvis-task-step', onStep);
+  }, []);
+
+  const extractionStep = [...liveSteps].reverse().find(s => /^SOURCE EXTRACTION · Q\./i.test(s.label));
+  const questionsSeen = useMemo(() => liveSteps.filter(s => /^SOURCE EXTRACTION · Q\./i.test(s.label)), [liveSteps]);
+  const liveQuestion = useMemo(() => {
+    const source = files[0]?.textPreview || '';
+    const match = extractionStep?.label.match(/Q\.(\d+)–Q\.(\d+)/i);
+    if (!source || !match) return null;
+    const start = Number(match[1]);
+    const end = Number(match[2]);
+    const pattern = /(?:^|\n)\s*(?:Q(?:uestion)?\s*\.?\s*)?(\d{1,3})[.)]\s+/gi;
+    const found = [...source.matchAll(pattern)];
+    const target = found.findIndex(m => Number(m[1]) === start);
+    if (target < 0) return { number: String(start), text: `Processing source questions Q.${start}–Q.${end}…`, range: `Q.${start}–Q.${end}` };
+    const next = found[target + 1];
+    const raw = source.slice(found[target].index, next?.index ?? source.length).trim();
+    return { number: String(start), text: raw.slice(0, 1200), range: `Q.${start}–Q.${end}` };
+  }, [files, extractionStep]);
+  const primaryArtifact = task?.result?.artifacts?.find(a => a.fileType === 'docx') || task?.result?.artifacts?.[0];
+
+  const reset = () => { setFiles([]); setTask(null); setLiveSteps([]); setError(''); setRunning(false); };
+
+  const startConversion = async () => {
+    if (running) return;
+    const pdf = files.find(f => f.type.includes('pdf') || /\.pdf$/i.test(f.name));
+    if (!pdf) { setError('Please upload a PDF first.'); return; }
+    setError(''); setRunning(true); setTask(null); setLiveSteps([]);
+    try {
+      const result = await ApiService.executeTask({
+        userPrompt: [
+          'Convert the uploaded PDF paper into one exact bilingual English + Hindi Word document.',
+          'SOURCE-LOCK: the PDF is the only authority.',
+          'Do NOT add, remove, correct, solve, summarize, reorder, renumber, or rewrite any source question or option.',
+          'Preserve the English question and every option exactly as printed. Translate only the English text into faithful Hindi.',
+          'Preserve all equations, fractions, powers, subscripts, superscripts, Greek letters, symbols, units, punctuation, decimals and scientific notation.',
+          'If a graph, figure, diagram or image cannot be reproduced accurately, insert a clearly labelled placeholder image in the Word document at that exact question location, showing the question number and what visual must be added manually.',
+          'Do not create an answer key or solutions.',
+          'Return the completed Word document as the main deliverable.'
+        ].join(' '),
+        selectedAgentId: 'pdf-bilingual', attachedFiles: [pdf], model: DEFAULT_SETTINGS.aiModel, settings: DEFAULT_SETTINGS
+      });
+      setTask(result);
+      if (result.status === 'failed') setError(result.error || 'Conversion failed.');
+    } catch (e: any) { setError(e?.message || 'Conversion failed.'); }
+    finally { setRunning(false); }
+  };
+
+  return <div className="simple-app">
+    <header className="simple-header">
+      <div><div className="brand">JARVIS <span>AI OFFICE</span></div><div className="subtitle">PDF → Exact Bilingual Paper</div></div>
+      <div className="status"><i className={running ? 'busy' : 'online'} /> {running ? 'PROCESSING' : 'READY'}</div>
+    </header>
+    <main className="simple-grid">
+      <section className="work-panel">
+        <div className="panel-title"><div><h1>Convert Paper</h1><p>Upload your PDF. JARVIS keeps the source unchanged and adds Hindi.</p></div>{files.length > 0 && !running && <button className="ghost-btn" onClick={reset}><XCircle size={16} /> Clear</button>}</div>
+        <div className="drop-card">
+          <FileText size={38} />
+          <h2>{files.length ? files[0].name : 'Upload your paper PDF'}</h2>
+          <p>{files.length ? 'PDF ready for conversion.' : 'Choose one PDF from your computer'}</p>
+          <FileDropzone attachedFiles={files} onAddFiles={newFiles => { const pdfs = newFiles.filter(f => f.type.includes('pdf') || /\.pdf$/i.test(f.name)); setFiles(pdfs.slice(0, 1)); setError(pdfs.length ? '' : 'Please select a PDF file.'); }} onRemoveFile={() => setFiles([])} disabled={running} />
+        </div>
+        <div className="rules">
+          <div><b>✓</b> English questions & options unchanged</div><div><b>✓</b> Hindi translation only</div>
+          <div><b>✓</b> Maths & special characters preserved</div><div><b>✓</b> Missing graph/figure → manual placeholder</div>
+        </div>
+        <button className="convert-btn" disabled={running || !files.length} onClick={startConversion}>{running ? <><Loader2 size={18} className="spin" /> Converting paper…</> : <><Upload size={18} /> Convert to Bilingual Word</>}</button>
+        {error && <div className="error-box">{error}</div>}
+        {task?.status === 'completed' && primaryArtifact && <div className="success-box"><div><CheckCircle2 size={22} /><div><strong>Paper ready</strong><span>English + Hindi Word document generated.</span></div></div><button onClick={() => downloadArtifact(primaryArtifact)}><Download size={17} /> Download Word</button></div>}
+      </section>
+      <aside className="live-panel">
+        <div className="live-head"><div><span className="live-dot" /> LIVE</div><span>{questionsSeen.length ? `${questionsSeen.length} batches processed` : 'Waiting for paper'}</span></div>
+        <div className="current-question">{liveQuestion ? <><div className="q-label">CURRENT SOURCE · {liveQuestion.range || `Q.${liveQuestion.number}`}</div><div className="q-text">{liveQuestion.text}</div></> : <div className="waiting-copy">{running ? 'Reading the PDF and preparing the first question…' : 'Upload a paper and start conversion. The current source question will appear here while JARVIS works.'}</div>}</div>
+        <div className="activity" ref={liveRef}>{liveSteps.map((step, i) => <div className="activity-row" key={`${step.timestamp}-${i}`}><span className="activity-dot" /><div><b>{step.label}</b>{step.details && <small>{step.details}</small>}</div></div>)}{!liveSteps.length && <div className="empty-activity">Live processing activity will appear here.</div>}</div>
+      </aside>
+    </main>
+  </div>;
 }
